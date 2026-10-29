@@ -11,10 +11,50 @@ IMAGE=os.environ.get('CVPILOT_DOCKER_IMAGE','openclaw-career-sandbox:1')
 MODEL=os.environ.get('CVPILOT_MODEL','ollama/gpt-oss:20b')
 
 
-def run(argv,timeout=90,env=None):
-    proc=subprocess.run(argv,check=False,text=True,capture_output=True,env=env,timeout=timeout)
-    if proc.returncode: raise RuntimeError(f"Command failed: {argv[0]} {argv[1] if len(argv)>1 else ''}: {(proc.stderr or proc.stdout)[-1100:]}")
+
+def run(argv, timeout=90, env=None):
+    argv = list(argv)
+
+    # Resolve OpenClaw even when systemd has a limited PATH.
+    if argv and argv[0] == 'openclaw':
+        binary = os.environ.get('CVPILOT_OPENCLAW_BIN')
+
+        if not binary:
+            binary = shutil.which('openclaw')
+
+        if not binary:
+            binary = str(
+                Path.home() / '.npm-global/bin/openclaw'
+            )
+
+        binary = Path(binary).expanduser()
+
+        if not binary.is_file() or not os.access(binary, os.X_OK):
+            raise RuntimeError(
+                f'OpenClaw executable not found: {binary}. '
+                'Set CVPILOT_OPENCLAW_BIN to the correct path.'
+            )
+
+        argv[0] = str(binary)
+
+    proc = subprocess.run(
+        argv,
+        check=False,
+        text=True,
+        capture_output=True,
+        env=env,
+        timeout=timeout
+    )
+
+    if proc.returncode:
+        raise RuntimeError(
+            f"Command failed: {argv[0]} "
+            f"{argv[1] if len(argv) > 1 else ''}: "
+            f"{(proc.stderr or proc.stdout)[-1100:]}"
+        )
+
     return proc.stdout.strip()
+
 
 def repopath(uid):return ROOT/'git-repos'/uid/'repo'
 def taskdir(uid,jid):return ROOT/'user-workspaces'/uid/'tasks'/str(jid)
@@ -25,8 +65,10 @@ def git_env(uid):
     e['GIT_TERMINAL_PROMPT']='0'
     return e
 
+
 def run_git(uid,dir,*argv,timeout=60):
     return run(['git','-c','core.hooksPath=/dev/null','-c','protocol.ext.allow=never','-C',str(dir),*argv],env=git_env(uid),timeout=timeout)
+
 
 def notify(uid, text):
     # Best effort private DM. If this fails, `/cvpilot status` remains usable.
@@ -42,6 +84,7 @@ def notify(uid, text):
         channel=rest('/users/@me/channels',{'recipient_id':uid})['id']
         rest(f'/channels/{channel}/messages',{'content':text[:1900],'allowed_mentions':{'parse':[]}})
     except Exception as e: print(f'DM delivery failed for {uid}: {e}',flush=True)
+
 
 def _write_intent(path, data):
     """Atomically write a private init record before GitHub side effects."""
