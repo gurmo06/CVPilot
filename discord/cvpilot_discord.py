@@ -46,11 +46,11 @@ async def public_authorized(interaction: discord.Interaction) -> bool:
     if not GUILD_ID.isdigit() or not PUBLIC_CHANNEL_ID.isdigit() or not USER_ROLE_ID.isdigit():
         await interaction.response.send_message('GUILD_ID, PUBLIC_CHANNEL_ID, or USER_ROLE_ID is not configured correctly.', ephemeral=True)
         return False
+    if OWNER_ID.isdigit() and interaction.user.id == int(OWNER_ID):
+        return True
     if interaction.guild_id != int(GUILD_ID) or interaction.channel_id != int(PUBLIC_CHANNEL_ID):
         await interaction.response.send_message('Use CVPilot in the designated #cvpilot channel.', ephemeral=True)
         return False
-    if OWNER_ID.isdigit() and interaction.user.id == int(OWNER_ID):
-        return True
     user_roles = getattr(interaction.user, 'roles', [])
     if int(USER_ROLE_ID) not in [getattr(role, 'id', None) for role in user_roles]:
         await interaction.response.send_message('Access requires the CVPilot User role.', ephemeral=True)
