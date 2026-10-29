@@ -138,57 +138,169 @@ def _activate_pending_deploy_key(active_key):
     pending.parent.rmdir()
 
 
+def _is_key_in_use(exc):
+    """Recognize GitHub's specific deploy-key collision error."""
+    return (
+        isinstance(exc, GitHubAPIError)
+        and exc.status == 422
+        and 'key is already in use' in str(exc).lower()
+    )
+
+
+def _archive_colliding_pending_key(pending):
+    """Preserve a rejected keypair instead of retrying it forever."""
+    public = pending.with_suffix('.pub')
+
+    archive = pending.parent.parent / 'previous-keys'
+    archive.mkdir(mode=0o700, exist_ok=True)
+    archive.chmod(0o700)
+
+    old = archive / ('rejected-pending-' + secrets.token_hex(8))
+
+    shutil.copy2(pending, old)
+    old.chmod(0o600)
+    shutil.copy2(public, old.with_suffix('.pub'))
+
+    pending.unlink()
+    public.unlink()
+
+
+def _register_pending_deploy_key(gh, name, uid, active_key):
+    """Generate or recover a deploy key, retrying only key collisions."""
+    pending = _pending_key_path(active_key)
+    public = pending.with_suffix('.pub')
+
+    for _ in range(3):
+        if pending.exists() != public.exists():
+            raise RuntimeError(
+                'Incomplete pending deploy key; operator review required'
+            )
+
+        if not pending.exists():
+            pending.parent.mkdir(mode=0o700, exist_ok=True)
+            pending.parent.chmod(0o700)
+
+            run([
+                'ssh-keygen',
+                '-t', 'ed25519',
+                '-N', '',
+                '-q',
+                '-f', str(pending),
+                '-C', f'cvpilot-{uid}'
+            ], timeout=20)
+
+            pending.chmod(0o600)
+
+            if not public.is_file():
+                raise RuntimeError('New SSH public key missing')
+
+        try:
+            gh.deploy_key(
+                name,
+                public.read_text().strip(),
+                uid
+            )
+
+        except GitHubAPIError as exc:
+            if not _is_key_in_use(exc):
+                raise
+
+            # This candidate key belongs to another repository.
+            # Archive it and generate a different one.
+            _archive_colliding_pending_key(pending)
+
+        else:
+            # GitHub accepted this key. Make it the active credential.
+            _activate_pending_deploy_key(active_key)
+            return
+
+    raise RuntimeError(
+        'Deploy key registration failed after 3 distinct attempts; '
+        'operator review required'
+    )
+
+
 def _ensure_deploy_key(gh, name, uid, active_key):
-    """Idempotently register a writeable key, rotating only on key collision."""
+    """Ensure the current repository has the correct writable deploy key."""
     active_public = active_key.with_suffix('.pub')
     pending = _pending_key_path(active_key)
     pending_public = pending.with_suffix('.pub')
-    existing = gh.api('GET', f'/repos/{gh.org}/{name}/keys')
-    titled = [k for k in existing if k.get('title') == f'cvpilot-{uid}']
-    if len(titled) > 1:
-        raise RuntimeError('Multiple CVPilot deploy keys found; operator review required')
 
+    existing = gh.api(
+        'GET',
+        f'/repos/{gh.org}/{name}/keys'
+    )
+
+    titled = [
+        key for key in existing
+        if key.get('title') == f'cvpilot-{uid}'
+    ]
+
+    if len(titled) > 1:
+        raise RuntimeError(
+            'Multiple CVPilot deploy keys found; operator review required'
+        )
+
+    # If GitHub already accepted a key, verify its identity.
     if titled:
         key = titled[0]
-        if key.get('read_only') is not False:
-            raise RuntimeError('Existing CVPilot deploy key is read-only; operator review required')
-        remote_material = _public_key_material(key.get('key', ''))
-        if active_public.is_file() and remote_material == _public_key_material(active_public.read_text()):
-            return
-        if pending_public.is_file() and remote_material == _public_key_material(pending_public.read_text()):
-            _activate_pending_deploy_key(active_key)
-            return
-        raise RuntimeError('Deploy key mismatch; refusing to replace an unknown key')
 
-    # Do not overwrite an incomplete pending key or invent a fresh one on each retry.
-    if pending.exists() != pending_public.exists():
-        raise RuntimeError('Incomplete pending deploy key; operator review required')
-    if pending.is_file():
-        # Previous attempt may have registered this key before crashing.
-        gh.deploy_key(name, pending_public.read_text().strip(), uid)
-        _activate_pending_deploy_key(active_key)
+        if key.get('read_only') is not False:
+            raise RuntimeError(
+                'Existing CVPilot deploy key is read-only'
+            )
+
+        remote = _public_key_material(key.get('key', ''))
+
+        if active_public.is_file():
+            if remote == _public_key_material(
+                active_public.read_text()
+            ):
+                return
+
+        # GitHub might have accepted a pending key before
+        # a previous worker crashed.
+        if pending_public.is_file():
+            if remote == _public_key_material(
+                pending_public.read_text()
+            ):
+                _activate_pending_deploy_key(active_key)
+                return
+
+        raise RuntimeError(
+            'Deploy key mismatch; refusing to replace an unknown key'
+        )
+
+    # Recover an interrupted earlier attempt.
+    if pending.exists() or pending_public.exists():
+        _register_pending_deploy_key(
+            gh, name, uid, active_key
+        )
         return
 
     if not active_key.is_file() or not active_public.is_file():
-        raise RuntimeError('Local deploy key pair is incomplete; operator review required')
+        raise RuntimeError(
+            'Local deploy key pair is incomplete; operator review required'
+        )
+
+    # First try the original key.
     try:
-        gh.deploy_key(name, active_public.read_text().strip(), uid)
+        gh.deploy_key(
+            name,
+            active_public.read_text().strip(),
+            uid
+        )
         return
+
     except GitHubAPIError as exc:
-        if exc.status != 422 or 'key is already in use' not in str(exc).lower():
+        if not _is_key_in_use(exc):
             raise
 
-    # This public key is attached to another repository. Do not delete that
-    # repository's deploy key or overwrite the local private key prematurely.
-    pending.parent.mkdir(mode=0o700, exist_ok=True)
-    pending.parent.chmod(0o700)
-    run(['ssh-keygen', '-t', 'ed25519', '-N', '', '-q',
-         '-f', str(pending), '-C', f'cvpilot-{uid}'], timeout=20)
-    pending.chmod(0o600)
-    if not pending_public.is_file():
-        raise RuntimeError('New SSH key is missing its public component')
-    gh.deploy_key(name, pending_public.read_text().strip(), uid)
-    _activate_pending_deploy_key(active_key)
+    # GitHub rejected the original key.
+    # Generate a replacement without deleting the old one.
+    _register_pending_deploy_key(
+        gh, name, uid, active_key
+    )
 
 
 def repo_init(job,store):
