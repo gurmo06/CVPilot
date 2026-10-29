@@ -17,7 +17,7 @@ import github
 import worker
 ORIGINAL_PROVISION_AGENT=worker.provision_agent
 
-UID='012345678901234567' # <-- Actual UID here
+UID='895682138282819645'
 
 
 class FakeStore:
@@ -40,6 +40,7 @@ class FakeGitHub:
         self.created=0
         self.keys=[]
         self.invited=0
+        self.used_keys=set()
 
     def get_repo(self, name):
         return self.repo
@@ -63,6 +64,8 @@ class FakeGitHub:
         raise AssertionError((method,path,data))
 
     def deploy_key(self, name, public_key, uid):
+        if tuple(public_key.split()[:2]) in self.used_keys:
+            raise github.GitHubAPIError(422, 'POST', f'/repos/{self.org}/{name}/keys', 'key is already in use')
         self.keys.append({'title': f'cvpilot-{uid}', 'key': public_key, 'read_only': False})
 
     def protect_main(self, name):
@@ -104,8 +107,10 @@ class InitRecoveryTests(unittest.TestCase):
         self.fake_git_calls.append(args)
         if args[0]=='ssh-keygen':
             p=Path(args[args.index('-f')+1])
-            p.write_text('TEST PRIVATE KEY')
-            p.with_suffix('.pub').write_text('ssh-ed25519 AAAATEST CVPilot')
+            p.parent.mkdir(parents=True,exist_ok=True)
+            p.write_text('TEST PRIVATE KEY ' + str(p))
+            value='AAAANEWKEY' if 'pending' in p.parts else 'AAAATEST'
+            p.with_suffix('.pub').write_text(f'ssh-ed25519 {value} CVPilot')
         elif args[:2]==['git','clone']:
             repo=Path(args[-1])
             repo.mkdir(parents=True)
@@ -231,6 +236,59 @@ class InitRecoveryTests(unittest.TestCase):
                        'read_only':False}]
         with self.assertRaisesRegex(RuntimeError,'Deploy key mismatch'):
             worker.repo_init(self.job(),self.store)
+
+    def test_existing_key_already_in_use_rotates_and_preserves_old(self):
+        self.gh.used_keys.add(('ssh-ed25519', 'AAAATEST'))
+        result=worker.repo_init(self.job(),self.store)
+        self.assertIn('career-',result['url'])
+        self.assertEqual(len(self.gh.keys),1)
+        self.assertEqual(self.gh.keys[0]['key'].split()[1], 'AAAANEWKEY')
+        active=worker.keypath(UID)
+        self.assertEqual(active.with_suffix('.pub').read_text().split()[1], 'AAAANEWKEY')
+        archives=list((active.parent/'previous-keys').glob('id_ed25519-*'))
+        self.assertEqual(len([p for p in archives if p.suffix != '.pub']),1)
+        self.assertTrue(all(p.stat().st_mode & 0o077 == 0 for p in archives if p.suffix != '.pub'))
+        self.assertFalse((active.parent/'pending').exists())
+
+    def test_retry_recovers_after_key_registered_but_not_activated(self):
+        marker='init-test'
+        self.intent({'name':f'career-{UID}','github_user':'sampleuser',
+                     'org':'CV-Pilot','marker':marker,'repo_id':33})
+        self.gh.repo={'id':33,'name':f'career-{UID}','private':True,
+                      'owner':{'login':'CV-Pilot'},
+                      'description':f'CVPilot managed workspace [{marker}]'}
+        active=worker.keypath(UID)
+        active.parent.mkdir(parents=True)
+        active.write_text('ORIGINAL PRIVATE')
+        active.with_suffix('.pub').write_text('ssh-ed25519 AAAATEST')
+        pending=worker._pending_key_path(active)
+        pending.parent.mkdir(parents=True)
+        pending.write_text('NEW PRIVATE')
+        pending.with_suffix('.pub').write_text('ssh-ed25519 AAAANEWKEY')
+        self.gh.keys=[{'title':f'cvpilot-{UID}',
+                       'key':'ssh-ed25519 AAAANEWKEY', 'read_only':False}]
+        worker.repo_init(self.job(),self.store)
+        self.assertEqual(active.read_text(),'NEW PRIVATE')
+        self.assertFalse(pending.exists())
+
+    def test_collision_only_rotates_for_specific_422(self):
+        class UnrelatedFailure(Exception):
+            pass
+        def deny(*args):
+            raise github.GitHubAPIError(422,'POST','/keys','deploy keys disabled')
+        self.gh.deploy_key=deny
+        with self.assertRaisesRegex(github.GitHubAPIError,'deploy keys disabled'):
+            worker.repo_init(self.job(),self.store)
+        active=worker.keypath(UID)
+        self.assertEqual(active.with_suffix('.pub').read_text().split()[1],'AAAATEST')
+        self.assertFalse(worker._pending_key_path(active).exists())
+
+    def test_existing_remote_mismatch_does_not_rotate(self):
+        self.gh.keys=[{'title':f'cvpilot-{UID}', 'key':'ssh-ed25519 WRONG',
+                       'read_only':False}]
+        with self.assertRaisesRegex(RuntimeError,'Deploy key mismatch'):
+            worker.repo_init(self.job(),self.store)
+        self.assertFalse(worker._pending_key_path(worker.keypath(UID)).exists())
 
     def test_public_repo_cannot_be_adopted(self):
         marker='init-test'
