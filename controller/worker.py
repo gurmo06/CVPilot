@@ -1,8 +1,8 @@
-import json, os, re, shutil, subprocess, time
+import json, os, re, secrets, shutil, subprocess, time
 from pathlib import Path
 from urllib.parse import quote
 from store import Store
-from github import GitHub,cmd,ssh_env
+from github import GitHub,GitHubAPIError,cmd,ssh_env
 
 ROOT=Path(os.environ.get('CVPILOT_STATE_DIR',str(Path.home()/'.local/state/cvpilot'))).resolve()
 KIT=Path(__file__).resolve().parent.parent
@@ -29,7 +29,7 @@ def run_git(uid,dir,*argv,timeout=60):
     return run(['git','-c','core.hooksPath=/dev/null','-c','protocol.ext.allow=never','-C',str(dir),*argv],env=git_env(uid),timeout=timeout)
 
 def notify(uid, text):
-    # Best effort private DM. If this fails, `/career status` remains usable.
+    # Best effort private DM. If this fails, `/cvpilot status` remains usable.
     import urllib.request,urllib.error
     token=os.environ.get('CVPILOT_DISCORD_TOKEN','')
     if not token: return
@@ -43,48 +43,114 @@ def notify(uid, text):
         rest(f'/channels/{channel}/messages',{'content':text[:1900],'allowed_mentions':{'parse':[]}})
     except Exception as e: print(f'DM delivery failed for {uid}: {e}',flush=True)
 
+def _write_intent(path, data):
+    """Atomically write a private init record before GitHub side effects."""
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    temp = path.with_name(path.name + '.tmp-' + secrets.token_hex(6))
+    try:
+        fd = os.open(temp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        with os.fdopen(fd, 'w') as stream:
+            json.dump(data, stream)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temp, path)
+    finally:
+        temp.unlink(missing_ok=True)
+
+
+def _check_owned_repo(repo, name, org, marker):
+    """Never adopt a repo without our durable creation marker."""
+    if not isinstance(repo, dict):
+        raise RuntimeError('Malformed GitHub repository response')
+    owner = (repo.get('owner') or {}).get('login', '')
+    if owner.lower() != org.lower() or repo.get('name', '').lower() != name.lower():
+        raise RuntimeError('GitHub returned an unexpected repository identity')
+    if repo.get('private') is not True:
+        raise RuntimeError('Refusing non-private GitHub repository')
+    if repo.get('description') != f'CVPilot managed workspace [{marker}]':
+        raise RuntimeError('Repository exists but cannot verify CVPilot ownership; operator review required')
+    if not isinstance(repo.get('id'), int):
+        raise RuntimeError('GitHub repository ID missing')
+    return repo['id']
+
+
+def _archive_checkout(repo):
+    """Preserve old local data when GitHub repo was deleted and recreated."""
+    if not repo.exists():
+        return None
+    backup = repo.with_name(repo.name + '.recovery-' + secrets.token_hex(4))
+    repo.rename(backup)
+    return backup
+
+
 def repo_init(job,store):
     uid=job['discord_id']; github_user=json.loads(job['payload'])['github_username']
     old=store.user(uid)
     if old and old['repo']: return {'url':f'https://github.com/{old["repo"]}','note':'Already initialized'}
     gh=GitHub(); name='career-'+uid
-    # Durable intent permits safe retry after partial init but never adoption of
-    # an arbitrary repository owned by somebody else.
+    org=gh.org  # GitHub client and worker must use exactly the same organization.
     intent=ROOT/'intents'/f'{uid}.json'
-    intent.parent.mkdir(parents=True,exist_ok=True)
+    intent.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
+    repo_info=gh.get_repo(name)
     if intent.exists():
         saved=json.loads(intent.read_text())
-        if saved.get('name')!=name or saved.get('github_user')!=github_user:
-            raise RuntimeError('Unfinished init for this Discord user has different parameters; operator review required')
-        existing=gh.api('GET',f'/repos/{ORG}/{name}')
-        if not existing.get('private'):raise RuntimeError('Existing repo unexpectedly public')
+        if (saved.get('name')!=name or saved.get('github_user')!=github_user
+                or saved.get('org', org).lower()!=org.lower()):
+            raise RuntimeError('Unfinished init has different parameters; operator review required')
+        if repo_info is not None and not saved.get('marker'):
+            raise RuntimeError('Legacy init intent cannot verify existing repo; operator review required')
     else:
-        # Only the controller owns this intent; it never trusts repo names from users.
-        import urllib.error
-        try:
-            gh.api('GET',f'/repos/{ORG}/{name}')
-        except RuntimeError as e:
-            if 'HTTP 404' not in str(e):raise
-        else:
-            raise RuntimeError('Repo already exists but is not in CVPilot registry; refusing takeover')
-        intent.write_text(json.dumps({'name':name,'github_user':github_user}))
-        intent.chmod(0o600)
-        gh.create_repo(name)
+        # No durable intent: an existing repo must never be adopted.
+        if repo_info is not None:
+            raise RuntimeError('Repository already exists without CVPilot intent; refusing takeover')
+        saved={'name':name,'github_user':github_user,'org':org}
+
+    if not saved.get('marker'):
+        saved['marker']='init-'+secrets.token_hex(16)
+        _write_intent(intent, saved)
+
+    old_repo_id=saved.get('repo_id')
+    recreated=False
+    if repo_info is None:
+        # A 404 can also conceal missing token access. Creation will fail if
+        # the GitHub token is unauthorized, rather than silently adopting data.
+        repo_info=gh.create_repo(name, saved['marker'])
+        recreated=True
+    actual_id=_check_owned_repo(repo_info,name,org,saved['marker'])
+    if old_repo_id is not None and old_repo_id!=actual_id and not recreated:
+        raise RuntimeError('Repository identity changed unexpectedly; operator review required')
+    saved['repo_id']=actual_id
+    _write_intent(intent,saved)
     p=keypath(uid);p.parent.mkdir(parents=True,exist_ok=True);p.parent.chmod(0o700)
     if not p.exists():
         run(['ssh-keygen','-t','ed25519','-N','','-q','-f',str(p),'-C',f'cvpilot-{uid}'],timeout=20)
     p.chmod(0o600)
-    keys=gh.api('GET',f'/repos/{ORG}/{name}/keys')
-    if not any(k.get('title')==f'cvpilot-{uid}' for k in keys):
-        gh.deploy_key(name,p.with_suffix('.pub').read_text().strip(),uid)
+    keys=gh.api('GET',f'/repos/{org}/{name}/keys')
+    local_pub=p.with_suffix('.pub').read_text().strip()
+    same_title=[k for k in keys if k.get('title')==f'cvpilot-{uid}']
+    if same_title:
+        key=same_title[0]
+        # Comments are optional and not part of the key material.
+        if key.get('key','').split()[:2]!=local_pub.split()[:2] or key.get('read_only') is not False:
+            raise RuntimeError('Deploy key mismatch or read-only key; operator review required')
+    else:
+        gh.deploy_key(name,local_pub,uid)
     known_hosts=Path.home()/'.ssh/known_hosts'
     if not known_hosts.exists() or 'github.com' not in known_hosts.read_text(errors='ignore'):
         raise RuntimeError('GitHub SSH known_hosts missing. Verify GitHub SSH fingerprint and add its host key before init.')
     home=(ROOT/'user-workspaces'/uid);home.mkdir(parents=True,exist_ok=True);home.chmod(0o700)
     repopath(uid).parent.mkdir(parents=True,exist_ok=True);repopath(uid).parent.chmod(0o700)
     repo=repopath(uid)
+    if recreated and repo.exists():
+        # A deleted/recreated remote has different history. Do not overwrite
+        # the old checkout, even if it contains uncommitted local changes.
+        archived=_archive_checkout(repo)
+        print(f'CVPilot archived stale checkout at {archived}',flush=True)
+    elif repo.exists() and not (repo/'.git').exists():
+        archived=_archive_checkout(repo)
+        print(f'CVPilot archived incomplete checkout at {archived}',flush=True)
     if not repo.exists():
-        run(['git','clone',f'git@github.com:{ORG}/{name}.git',str(repo)],env=git_env(uid),timeout=70)
+        run(['git','clone',f'git@github.com:{org}/{name}.git',str(repo)],env=git_env(uid),timeout=70)
     # Only provisioning may seed main. Normal worker tasks cannot touch main.
     for d in ('master-resumes/swe','master-resumes/systems','master-resumes/ml','master-resumes/it','master-resumes/web','profile','applications'):
         (repo/d).mkdir(parents=True,exist_ok=True)
@@ -107,9 +173,9 @@ def repo_init(job,store):
     provision_agent(uid,home)
     with store.tx() as c:
         c.execute('INSERT INTO users(discord_id,github_user,repo,agent) VALUES(?,?,?,?)',
-            (uid,github_user,f'{ORG}/{name}',f'career-{uid}'))
+            (uid,github_user,f'{org}/{name}',f'career-{uid}'))
     intent.unlink(missing_ok=True)
-    return {'url':f'https://github.com/{ORG}/{name}',
+    return {'url':f'https://github.com/{org}/{name}',
             'note':f'Private repo created; GitHub invitation issued to {github_user} (accept it to view files). main protection: {protection}. Agent may need a gateway restart to activate new DM route.'}
 
 def provision_agent(uid,home):
@@ -119,7 +185,7 @@ def provision_agent(uid,home):
     shutil.copy2(KIT/'templates/AGENTS.md',workspace/'AGENTS.md')
     for name in ('career-resume','career-source-sync'):
         dest=workspace/'skills'/name
-        shutil.copytree(KIT/'skills'/name,dest,dirs_exist_ok=True)
+        shutil.copytree(KIT/'templates'/'skills'/name,dest,dirs_exist_ok=True)
     known_agents=run(['openclaw','agents','list','--json'],timeout=35)
     if agent not in known_agents:
         run(['openclaw','agents','add',agent,'--workspace',str(workspace),'--model',MODEL,'--non-interactive','--json'],timeout=90)
@@ -293,5 +359,5 @@ def forever(store,stop=None):
             notify(job['discord_id'],f"CVPilot job #{job['id']} complete. {result.get('url','')}\n{result.get('note','')}")
         except Exception as e:
             store.finish(job['id'],'failed',error=str(e))
-            notify(job['discord_id'],f"CVPilot job #{job['id']} failed: {str(e)[:1400]}. Check `/career status`.")
+            notify(job['discord_id'],f"CVPilot job #{job['id']} failed: {str(e)[:1400]}. Check `/cvpilot status`.")
             print(f'Job {job["id"]} failed: {e}',flush=True)

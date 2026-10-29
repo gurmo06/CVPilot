@@ -2,6 +2,17 @@ import json, os, subprocess, urllib.request, urllib.error
 from pathlib import Path
 
 ORG='CVPilot'
+
+class GitHubAPIError(RuntimeError):
+    """GitHub API error with a structured HTTP status."""
+
+    def __init__(self, status, method, path, detail):
+        self.status = status
+        self.method = method
+        self.path = path
+        super().__init__(f'GitHub HTTP {status} on {method} {path}: {detail}')
+
+
 class GitHub:
     def __init__(self):
         self.token=os.environ.get('CVPILOT_GITHUB_TOKEN','')
@@ -21,10 +32,20 @@ class GitHub:
                 return json.loads(b) if b else {}
         except urllib.error.HTTPError as e:
             body=e.read(500).decode(errors='replace')
-            raise RuntimeError(f'GitHub HTTP {e.code} on {method} {path}: {body}') from e
-    def create_repo(self, name):
+            raise GitHubAPIError(e.code, method, path, body) from e
+    def get_repo(self, name):
+        try:
+            return self.api('GET', f'/repos/{self.org}/{name}')
+        except GitHubAPIError as exc:
+            if exc.status == 404:
+                return None
+            raise
+
+    def create_repo(self, name, marker):
         data=self.api('POST',f'/orgs/{self.org}/repos',
-                      {'name':name,'private':True,'auto_init':True,'has_issues':False,'has_wiki':False})
+                      {'name':name,'private':True,'auto_init':True,
+                       'description':f'CVPilot managed workspace [{marker}]',
+                       'has_issues':False,'has_wiki':False})
         if data.get('private') is not True: raise RuntimeError('Created repo is not private')
         return data
     def deploy_key(self, name, public_key, uid):
