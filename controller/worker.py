@@ -83,6 +83,114 @@ def _archive_checkout(repo):
     return backup
 
 
+
+def _public_key_material(public_key):
+    """Compare algorithm and base64 payload; ignore optional SSH comments."""
+    fields = public_key.strip().split()
+    if len(fields) < 2:
+        raise RuntimeError('Malformed SSH public key')
+    return tuple(fields[:2])
+
+
+def _pending_key_path(active_key):
+    return active_key.parent / 'pending' / 'id_ed25519'
+
+
+def _activate_pending_deploy_key(active_key):
+    """Preserve the previous credential and activate a GitHub-accepted key.
+
+    The pending pair is retained until the operation completes, making a
+    retry after interruption possible even if one active file was replaced.
+    """
+    pending = _pending_key_path(active_key)
+    pending_public = pending.with_suffix('.pub')
+    if not pending.is_file() or not pending_public.is_file():
+        raise RuntimeError('Incomplete pending deploy key; operator review required')
+
+    active_public = active_key.with_suffix('.pub')
+    if active_key.exists() and active_public.exists():
+        if _public_key_material(active_public.read_text()) != _public_key_material(pending_public.read_text()):
+            archive = active_key.parent / 'previous-keys'
+            archive.mkdir(mode=0o700, exist_ok=True)
+            archive.chmod(0o700)
+            prior = archive / ('id_ed25519-' + secrets.token_hex(8))
+            shutil.copy2(active_key, prior)
+            shutil.copy2(active_public, prior.with_suffix('.pub'))
+            prior.chmod(0o600)
+
+    # Stage copies so pending files survive interrupted activation.
+    suffix = secrets.token_hex(8)
+    staged_private = active_key.parent / ('.id_ed25519-next-' + suffix)
+    staged_public = active_key.parent / ('.id_ed25519-next-' + suffix + '.pub')
+    try:
+        shutil.copy2(pending, staged_private)
+        staged_private.chmod(0o600)
+        shutil.copy2(pending_public, staged_public)
+        os.replace(staged_private, active_key)
+        os.replace(staged_public, active_public)
+    finally:
+        staged_private.unlink(missing_ok=True)
+        staged_public.unlink(missing_ok=True)
+
+    # Remove the staging pair only after both active files are in place.
+    pending.unlink()
+    pending_public.unlink()
+    pending.parent.rmdir()
+
+
+def _ensure_deploy_key(gh, name, uid, active_key):
+    """Idempotently register a writeable key, rotating only on key collision."""
+    active_public = active_key.with_suffix('.pub')
+    pending = _pending_key_path(active_key)
+    pending_public = pending.with_suffix('.pub')
+    existing = gh.api('GET', f'/repos/{gh.org}/{name}/keys')
+    titled = [k for k in existing if k.get('title') == f'cvpilot-{uid}']
+    if len(titled) > 1:
+        raise RuntimeError('Multiple CVPilot deploy keys found; operator review required')
+
+    if titled:
+        key = titled[0]
+        if key.get('read_only') is not False:
+            raise RuntimeError('Existing CVPilot deploy key is read-only; operator review required')
+        remote_material = _public_key_material(key.get('key', ''))
+        if active_public.is_file() and remote_material == _public_key_material(active_public.read_text()):
+            return
+        if pending_public.is_file() and remote_material == _public_key_material(pending_public.read_text()):
+            _activate_pending_deploy_key(active_key)
+            return
+        raise RuntimeError('Deploy key mismatch; refusing to replace an unknown key')
+
+    # Do not overwrite an incomplete pending key or invent a fresh one on each retry.
+    if pending.exists() != pending_public.exists():
+        raise RuntimeError('Incomplete pending deploy key; operator review required')
+    if pending.is_file():
+        # Previous attempt may have registered this key before crashing.
+        gh.deploy_key(name, pending_public.read_text().strip(), uid)
+        _activate_pending_deploy_key(active_key)
+        return
+
+    if not active_key.is_file() or not active_public.is_file():
+        raise RuntimeError('Local deploy key pair is incomplete; operator review required')
+    try:
+        gh.deploy_key(name, active_public.read_text().strip(), uid)
+        return
+    except GitHubAPIError as exc:
+        if exc.status != 422 or 'key is already in use' not in str(exc).lower():
+            raise
+
+    # This public key is attached to another repository. Do not delete that
+    # repository's deploy key or overwrite the local private key prematurely.
+    pending.parent.mkdir(mode=0o700, exist_ok=True)
+    pending.parent.chmod(0o700)
+    run(['ssh-keygen', '-t', 'ed25519', '-N', '', '-q',
+         '-f', str(pending), '-C', f'cvpilot-{uid}'], timeout=20)
+    pending.chmod(0o600)
+    if not pending_public.is_file():
+        raise RuntimeError('New SSH key is missing its public component')
+    gh.deploy_key(name, pending_public.read_text().strip(), uid)
+    _activate_pending_deploy_key(active_key)
+
+
 def repo_init(job,store):
     uid=job['discord_id']; github_user=json.loads(job['payload'])['github_username']
     old=store.user(uid)
@@ -125,16 +233,7 @@ def repo_init(job,store):
     if not p.exists():
         run(['ssh-keygen','-t','ed25519','-N','','-q','-f',str(p),'-C',f'cvpilot-{uid}'],timeout=20)
     p.chmod(0o600)
-    keys=gh.api('GET',f'/repos/{org}/{name}/keys')
-    local_pub=p.with_suffix('.pub').read_text().strip()
-    same_title=[k for k in keys if k.get('title')==f'cvpilot-{uid}']
-    if same_title:
-        key=same_title[0]
-        # Comments are optional and not part of the key material.
-        if key.get('key','').split()[:2]!=local_pub.split()[:2] or key.get('read_only') is not False:
-            raise RuntimeError('Deploy key mismatch or read-only key; operator review required')
-    else:
-        gh.deploy_key(name,local_pub,uid)
+    _ensure_deploy_key(gh, name, uid, p)
     known_hosts=Path.home()/'.ssh/known_hosts'
     if not known_hosts.exists() or 'github.com' not in known_hosts.read_text(errors='ignore'):
         raise RuntimeError('GitHub SSH known_hosts missing. Verify GitHub SSH fingerprint and add its host key before init.')
