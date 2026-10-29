@@ -46,4 +46,4 @@ def cmd(args, **kwargs):
 
 def ssh_env(keypath,known_hosts):
     # Never put shell interp data from the model into this config.
-    return {'GIT_SSH_COMMAND':f'ssh -i {keypath} -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile={known_hosts}'}
+    return {'GIT_SSH_COMMAND':f'ssh -F /dev/null -i {keypath} -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile={known_hosts}'}
