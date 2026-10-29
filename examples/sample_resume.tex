@@ -1,0 +1,156 @@
+% CVPilot public portfolio example
+% SYNTHETIC DEMO ONLY: all names, email addresses, employers, schools,
+% projects, dates, numerical results, and achievements below are fictional.
+% Built from the author's submitted resume layout with sample content.
+% Compile with: xelatex -interaction=nonstopmode sample_resume.tex
+\documentclass[10pt,letterpaper]{article}
+\usepackage[letterpaper,top=0.30in,bottom=0.32in,left=0.50in,right=0.50in]{geometry}
+\usepackage{fontspec}
+% Load TeX Live's font files directly, without system font-name lookup.
+\setmainfont{Carlito}[
+  Extension=.ttf,
+  UprightFont=*-Regular,
+  BoldFont=*-Bold,
+  ItalicFont=*-Italic,
+  BoldItalicFont=*-BoldItalic
+]
+\setsansfont{Carlito}[
+  Extension=.ttf,
+  UprightFont=*-Regular,
+  BoldFont=*-Bold,
+  ItalicFont=*-Italic,
+  BoldItalicFont=*-BoldItalic
+]
+\renewcommand{\familydefault}{\sfdefault}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{tabularx}
+\usepackage{enumitem}
+\usepackage{array}
+\usepackage{ragged2e}
+\pagestyle{empty}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0pt}
+\setlength{\tabcolsep}{0pt}
+\setlength{\emergencystretch}{1em}
+\hyphenpenalty=10000
+\exhyphenpenalty=10000
+\tolerance=2500
+\definecolor{linkblue}{HTML}{0563C1}
+\hypersetup{colorlinks=true,urlcolor=linkblue,linkcolor=linkblue,pdfborder={0 0 0}}
+\urlstyle{same}
+
+\newcommand{\ressection}[1]{%
+  \vspace{1.8pt}%
+  {\fontsize{11.1}{11.9}\selectfont\bfseries\MakeUppercase{#1}}\par
+  \vspace{0.35pt}\hrule height 0.55pt\vspace{3.0pt}%
+}
+
+\newcommand{\eduline}[3]{%
+  {\fontsize{10.1}{11.15}\selectfont
+  \begin{tabularx}{\textwidth}{@{}X >{\centering\arraybackslash\itshape\bfseries}p{0.36\textwidth} >{\raggedleft\arraybackslash\bfseries}p{0.265\textwidth}@{}}
+    #1 & #2 & #3
+  \end{tabularx}}\vspace{-0.1pt}%
+}
+
+\newcommand{\expline}[4]{%
+  {\fontsize{10.1}{11.25}\selectfont
+  \begin{tabularx}{\textwidth}{@{}X >{\centering\arraybackslash\itshape\bfseries}p{0.32\textwidth} >{\raggedleft\arraybackslash\bfseries}p{0.205\textwidth}@{}}
+    \textbf{#1} -- #2 & #3 & #4
+  \end{tabularx}}\vspace{-0.3pt}%
+}
+
+\newcommand{\projline}[4]{%
+  {\fontsize{10.1}{11.25}\selectfont
+  \begin{tabularx}{\textwidth}{@{}X >{\raggedleft\arraybackslash\bfseries}p{0.205\textwidth}@{}}
+    {\href{#1}{\bfseries\underline{#2}}\, $|$ \textit{#3}} & #4
+  \end{tabularx}}\vspace{-0.2pt}%
+}
+
+\newenvironment{resitems}{%
+  \begin{itemize}[leftmargin=18pt,labelindent=0pt,labelsep=11.5pt,labelwidth=6pt,align=left,
+                  itemsep=0.42pt,topsep=0.38pt,parsep=0pt,partopsep=0pt]
+  \fontsize{10.05}{12.0}\selectfont\RaggedRight
+}{\end{itemize}\vspace{0.48pt}}
+
+\newcommand{\skillline}[2]{%
+  {\fontsize{10.0}{12.0}\selectfont\RaggedRight\textbf{#1}: #2\par}\vspace{0.15pt}%
+}
+
+
+\begin{document}
+\begin{center}
+{\fontsize{14.2}{14.9}\selectfont\bfseries ALEX MORGAN}\\[-0.1pt]
+{\fontsize{10.5}{11.4}\selectfont
+\href{mailto:alex.morgan@example.com}{\underline{alex.morgan@example.com}} $|$
+\href{https://example.com/github}{\underline{GitHub}} $|$
+\href{https://example.com/linkedin}{\underline{LinkedIn}} $|$
+\href{https://example.com/portfolio}{\underline{Portfolio}} $|$ Austin, TX}
+\end{center}
+\vspace{-6pt}
+
+\ressection{Education}
+\eduline{\textbf{Sample State University - GPA:} 3.85}{Bachelor of Science, Computer Science}{Aug 2024 -- May 2028 (Expected)}
+\eduline{\textbf{Example Community College - GPA:} 3.90}{Associate of Science}{Aug 2022 -- May 2024}
+
+\ressection{Skills}
+\skillline{Programming Languages}{Python, C, C++, Java, TypeScript, JavaScript, SQL, Bash, ARM Assembly}
+\skillline{Frameworks/Libraries}{React, Next.js, Node.js, Tailwind CSS, pandas, NumPy, scikit-learn, LightGBM, PyTest}
+\skillline{Developer Tools}{Git, Linux, Docker, GCC, GNU Make, PostgreSQL, Playwright, CI/CD, LaTeX}
+\skillline{Technical Areas}{data structures \& algorithms, operating systems, computer architecture, machine learning, cloud computing, full-stack development, testing and debugging}
+\skillline{Professional Skills}{rapid learner, adaptable problem-solver, technical communicator, collaborative, detail-oriented, self-directed}
+\skillline{Coursework}{Machine Learning, Artificial Intelligence, Operating Systems, Computer Architecture, Algorithms, Linear Algebra, Database Systems}
+
+\ressection{Experience}
+\expline{Example Web Studio}{Austin, TX}{Software Engineering Intern}{Jun -- Aug 2026}
+\begin{resitems}
+\item Built responsive client-facing pages using React, TypeScript, and reusable UI components with accessible navigation and form validation.
+\item Improved page load performance by optimizing asset delivery, reducing unnecessary requests, and measuring changes with browser performance tools.
+\item Collaborated with designers and engineers to resolve production issues, review pull requests, and ship tested features on a two-week release cycle.
+\end{resitems}
+\expline{Sample Computing Laboratory}{Austin, TX}{Undergraduate Research Assistant}{Jun -- Aug 2025}
+\begin{resitems}
+\item Developed Python experiments to compare scheduling strategies under changing workloads and resource constraints.
+\item Implemented reproducible benchmarks, collected runtime metrics, and automated result summaries for research discussions.
+\item Documented experiment assumptions and validated results against reference implementations and synthetic test cases.
+\end{resitems}
+\expline{Community Technology Center}{Austin, TX}{IT Support Technician}{May 2024 -- Present}
+\begin{resitems}
+\item Troubleshoot workstation, network, access, and peripheral issues for staff across shared office systems.
+\item Standardized setup checklists and incident documentation to improve repeatability and simplify future support requests.
+\item Maintain internal documentation for common software and hardware problems, including backup and recovery procedures.
+\end{resitems}
+
+\ressection{Projects}
+\projline{https://example.com/pipeline-simulator}{CPU Pipeline Simulator}{TypeScript, React, Vite, Vitest}{Jan -- Apr 2026}
+\begin{resitems}
+\item Built a browser-based simulator of a five-stage, in-order processor with interactive instruction stepping and cycle-by-cycle views.
+\item Visualized data hazards, forwarding, stalls, branch flushes, and register/memory state to explain instruction execution.
+\item Added unit and integration tests for instruction semantics, hazard behavior, edge cases, and UI workflows.
+\end{resitems}
+\projline{https://example.com/incident-classifier}{Incident Severity Classifier}{Python, pandas, LightGBM, scikit-learn}{Feb -- May 2026}
+\begin{resitems}
+\item Created a supervised-learning pipeline using a synthetic dataset of 200K incident records with numerical and categorical features.
+\item Engineered temporal and frequency-based features, addressed class imbalance, and evaluated models with stratified cross-validation.
+\item Compared thresholds and feature subsets, achieving a simulated ROC-AUC of 0.91 on a held-out evaluation split.
+\end{resitems}
+\projline{https://example.com/teaching-os}{Teaching Operating System}{C, x86, GCC, GNU Make}{Sep -- Dec 2025}
+\begin{resitems}
+\item Implemented kernel-level scheduling, synchronization, system calls, and basic virtual-memory functionality in an educational OS.
+\item Developed process management and memory validation routines with concurrency-aware tests and defensive error handling.
+\item Extended file operations and directory support while documenting invariants and testing concurrent access patterns.
+\end{resitems}
+\projline{https://example.com/cloud-scheduler}{Cloud Scheduling Simulator}{C++, Linux, Python}{Sep -- Nov 2025}
+\begin{resitems}
+\item Compared four VM placement policies using simulated workloads, tracking energy consumption, utilization, and SLA violations.
+\item Added repeatable benchmarking scripts and summary reports to analyze performance across workload sizes.
+\end{resitems}
+\projline{https://example.com/issue-tracker}{Team Issue Tracker}{Next.js, Node.js, PostgreSQL}{May -- Jul 2025}
+\begin{resitems}
+\item Developed a full-stack ticketing application with authenticated sessions, role-based access control, and searchable issue history.
+\item Designed REST endpoints and relational database tables, adding integration tests for validation and workflow transitions.
+\end{resitems}
+
+\vfill
+{\centering\fontsize{7.5}{8.5}\selectfont\color{gray}CVPilot demonstration resume --- all identities, experience, and results are fictional.\par}
+\end{document}

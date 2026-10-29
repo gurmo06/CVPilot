@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "last_reviewed_main_commit": null,
+  "facts": {},
+  "source_manifest": {},
+  "notes": "Store facts with stable IDs, source paths and exact source SHA-256 hashes; preserve user-confirmed evidence."
+}

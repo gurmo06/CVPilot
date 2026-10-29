@@ -1,0 +1,19 @@
+# TeX intermediates
+*.aux
+*.log
+*.out
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.toc
+*.bbl
+*.blg
+# Editor/OS
+.DS_Store
+.vscode/
+.idea/
+# Secrets
+.env
+*.pem
+id_ed25519
+# Application-specific resume PDFs are tracked explicitly.

@@ -1,0 +1,7 @@
+{
+  "id": "cvpilot",
+  "name": "CVPilot Career Commands",
+  "description": "Authenticated career commands backed by a private local FIFO service",
+  "activation": {"onStartup": true},
+  "configSchema": {"type": "object", "additionalProperties": false}
+}
