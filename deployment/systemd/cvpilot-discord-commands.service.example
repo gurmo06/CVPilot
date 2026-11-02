@@ -1,0 +1,17 @@
+# Example only. Adjust paths and options for your installation.
+# Never commit the real controller.env file.
+[Unit]
+Description=CVPilot Discord slash commands
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/cvpilot/controller.env
+WorkingDirectory=%h/.local/share/cvpilot/discord
+ExecStart=/usr/bin/python3 -u %h/.local/share/cvpilot/discord/cvpilot_discord.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
