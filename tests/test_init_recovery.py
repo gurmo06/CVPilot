@@ -17,7 +17,7 @@ import github
 import worker
 ORIGINAL_PROVISION_AGENT=worker.provision_agent
 
-UID='895682138282819645'
+UID="012345678901234567" # <-- Actual UID here
 
 
 class FakeStore:

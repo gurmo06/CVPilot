@@ -46,11 +46,36 @@ def run(argv, timeout=90, env=None):
         timeout=timeout
     )
 
+    
     if proc.returncode:
+        detail = (proc.stderr or proc.stdout).strip()
+
+        # OpenClaw may print structured errors on stdout
+        # while printing unrelated warnings on stderr.
+        if argv and (
+            'openclaw' in str(argv[0])
+            or str(argv[0]).endswith('/openclaw')
+        ):
+            try:
+                response = json.loads(proc.stdout)
+
+                if (
+                    isinstance(response, dict)
+                    and response.get('ok') is False
+                ):
+                    error = response.get('error') or {}
+                    detail = error.get(
+                        'message',
+                        'Unknown OpenClaw error'
+                    )
+            except (ValueError, AttributeError, TypeError):
+                pass
+
         raise RuntimeError(
-            f"Command failed: {argv[0]} "
+            f"Command failed ({proc.returncode}): "
+            f"{argv[0]} "
             f"{argv[1] if len(argv) > 1 else ''}: "
-            f"{(proc.stderr or proc.stdout)[-1100:]}"
+            f"{detail[-1100:]}"
         )
 
     return proc.stdout.strip()
