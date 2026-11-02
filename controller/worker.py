@@ -444,9 +444,19 @@ def repo_init(job,store):
         run_git(uid,repo,'commit','-m','Initialize CVPilot career workspace')
         run_git(uid,repo,'push','origin','main')
     protection='enabled'
-    try: gh.protect_main(name)
-    except Exception as e:
-        protection=f'FAILED: {e}'
+
+    try:
+        gh.protect_main(name)
+
+    except GitHubAPIError as e:
+        if e.status == 403 and 'Upgrade to GitHub Pro' in str(e):
+            protection = (
+                'unavailable on current GitHub plan; '
+                'main is not protected'
+            )
+        else:
+            protection = f'not enabled: {e}'
+
     gh.invite(name,github_user)
     # Separate OpenClaw agent and private sandbox, without Git admin creds.
     provision_agent(uid,home)
