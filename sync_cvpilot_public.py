@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """One-way, allowlisted CVPilot source sync: live installation -> public Git repo.
 
-Dry-run by default. Use --apply to copy changed files. Never deletes files,
-commits, pushes, or copies credentials/runtime state.
+Dry-run by default. --apply updates existing files only. Add
+--confirm-add-delete to include new and obsolete allowlisted source files.
+Both flags are required to add or delete files. Never commits, pushes, or
+copies credentials/runtime state.
 """
 
 import argparse
@@ -19,8 +21,8 @@ PUBLIC = HOME / "CVPilot-public"
 EXTENSION = HOME / ".openclaw/extensions/cvpilot"
 USER_SYSTEMD = HOME / ".config/systemd/user"
 
-# Keep the original source-code behavior: only update existing public files.
-# New source files are reported for manual review, not silently published.
+# Existing files are updated with --apply. Additions and deletions require
+# the additional --confirm-add-delete flag and stay inside these source groups.
 GROUPS = {
     "controller": (APP / "controller", {".py"}),
     "discord": (LIVE / "discord", {".py"}),
@@ -40,7 +42,7 @@ COMPAT_LIVE = (USER_SYSTEMD / "cvpilot-controller.service.d"
 
 def git(*args):
     return subprocess.run(
-        ["git", "-C", str(PUBLIC), *args],
+        ["git", "--no-optional-locks", "-C", str(PUBLIC), *args],
         check=True, capture_output=True, text=True,
     ).stdout
 
@@ -106,7 +108,9 @@ def validated_override():
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply", action="store_true",
-                        help="Copy changes (default: preview only)")
+                        help="Apply the previewed operations (default: preview only)")
+    parser.add_argument("--confirm-add-delete", action="store_true",
+                        help="Include new and obsolete allowlisted source files; requires --apply to modify anything")
     args = parser.parse_args()
 
     if PUBLIC.is_symlink() or not PUBLIC.is_dir() or not (PUBLIC / ".git").exists():
@@ -129,18 +133,23 @@ def main():
     actions = []
     skipped_new = []
     public_only = []
+    deletions = []
+    unsafe_sources = []
 
     for group, (src_root, suffixes) in groups.items():
         dst_root = PUBLIC / group
-        if not dst_root.is_dir() or dst_root.is_symlink():
-            raise RuntimeError(f"Missing/unsafe public directory: {dst_root}")
+        if dst_root.is_symlink() or (dst_root.exists() and not dst_root.is_dir()):
+            raise RuntimeError(f"Unsafe public directory: {dst_root}")
         live_relpaths = set()
         for rel, source in source_files(src_root, suffixes):
             live_relpaths.add(rel)
             dest = dst_root / rel
             check_destination(dest)
             if not dest.is_file():
-                skipped_new.append(dest.relative_to(PUBLIC))
+                if args.confirm_add_delete:
+                    actions.append((dest, source, None, True))
+                else:
+                    skipped_new.append(dest.relative_to(PUBLIC))
             elif not filecmp.cmp(source, dest, shallow=False):
                 actions.append((dest, source, None, False))
         for dest in sorted(dst_root.rglob("*")):
@@ -148,7 +157,16 @@ def main():
                 rel = dest.relative_to(dst_root)
                 if (not any(part in SKIP_PARTS for part in rel.parts)
                         and is_allowed(dest, suffixes) and rel not in live_relpaths):
-                    public_only.append(dest.relative_to(PUBLIC))
+                    check_destination(dest)
+                    counterpart = src_root / rel
+                    # Excluded symlinks or non-regular live paths are not proof
+                    # of deletion. Never remove their public copies.
+                    if counterpart.exists() or counterpart.is_symlink():
+                        unsafe_sources.append(dest.relative_to(PUBLIC))
+                    elif args.confirm_add_delete:
+                        deletions.append(dest)
+                    else:
+                        public_only.append(dest.relative_to(PUBLIC))
 
     src_docker = APP / "Dockerfile"
     dst_docker = PUBLIC / "Dockerfile"
@@ -170,41 +188,68 @@ def main():
     if actions:
         for dest, _, _, is_new in actions:
             print(f"{'ADD   ' if is_new else 'UPDATE'} {dest.relative_to(PUBLIC)}")
-    else:
-        print("All managed public files match their sources.")
+    if deletions:
+        for dest in deletions:
+            print(f"DELETE {dest.relative_to(PUBLIC)}")
+    if not actions and not deletions:
+        print("No enabled file operations are needed.")
     if skipped_new:
-        print("\nNew live SOURCE files not copied (review manually):")
+        print("\nNew live SOURCE files skipped (enable with --confirm-add-delete):")
         for rel in skipped_new:
             print(f"  {rel}")
     if public_only:
-        print("\nPublic-only source files not deleted:")
+        print("\nPublic-only source files preserved (enable deletion with --confirm-add-delete):")
         for rel in public_only:
             print(f"  {rel}")
 
+    if unsafe_sources:
+        print("\nPublic files preserved because their live counterparts are unsafe/excluded:")
+        for rel in unsafe_sources:
+            print(f"  {rel}")
+
     if not args.apply:
-        print("\nUse --apply to perform ADD and UPDATE actions.")
+        print("\nUse --apply to update existing files only.")
+        print("Use --apply --confirm-add-delete to also add and delete allowlisted source files.")
         return
 
     conflicts = []
-    for dest, _, _, _ in actions:
+    targets = [dest for dest, _, _, _ in actions] + deletions
+    for dest in targets:
+        check_destination(dest)
         rel = str(dest.relative_to(PUBLIC))
-        if git("status", "--porcelain", "--", rel).strip():
+        if git("status", "--porcelain", "--untracked-files=all", "--", rel).strip():
             conflicts.append(rel)
+    for dest in deletions:
+        rel = str(dest.relative_to(PUBLIC))
+        try:
+            # Ignored untracked files do not appear in ordinary git status.
+            # Deletion is restricted to files already tracked by this repo.
+            git("ls-files", "--error-unmatch", "--", rel)
+        except subprocess.CalledProcessError:
+            if rel not in conflicts:
+                conflicts.append(rel + " (not tracked; preserved)")
     if conflicts:
-        print("\nRefusing to overwrite paths with Git changes:", file=sys.stderr)
+        print("\nRefusing to overwrite or delete paths with Git changes or untracked data:", file=sys.stderr)
         for rel in conflicts:
             print(f"  {rel}", file=sys.stderr)
         print("Commit, stash, or reconcile those paths first.", file=sys.stderr)
         sys.exit(2)
 
+    # Validate the complete plan before any write. Recheck destination paths
+    # immediately before each operation as well.
     for dest, source, content, _ in actions:
+        check_destination(dest)
         dest.parent.mkdir(parents=True, exist_ok=True)
         if source is not None:
             shutil.copy2(source, dest)
         else:
             dest.write_bytes(content)
 
-    print(f"\nCopied {len(actions)} file(s). No Git commit or push performed.")
+    for dest in deletions:
+        check_destination(dest)
+        dest.unlink()
+
+    print(f"\nCopied {len(actions)} file(s); deleted {len(deletions)} file(s). No Git commit or push performed.")
     print("Review before publishing: git diff; git status --short; git diff --check")
     print("Inspect for credentials and personal information before git add/push.")
 
