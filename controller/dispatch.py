@@ -18,10 +18,10 @@ def process(req, store):
     if action=='status':
         return {'text':'\n'.join([f"#{j['id']} {j['kind']}: {j['state']}" + (f" — {json.loads(j['result']).get('url','')}" if j['result'] else '') + (f" — {j['error'][:120]}" if j['error'] else '') for j in store.recent(uid)]) or 'No jobs yet.'}
     if action=='repo':
-        return {'text':f"https://github.com/{user['repo']} (private; requires an accepted invitation)" if user and user.get('repo') else 'Not initialized. Use `/cvpilot init YOUR_GITHUB_USERNAME`.'}
+        return {'text':f"https://github.com/{user['repo']} (private; requires an accepted invitation)" if user and user.get('repo') else 'Not initialized. Use `/cvpilot init github_username:YOUR_GITHUB_USERNAME`.'}
     if action=='settings':
         if not user: raise ValueError('Initialize with /cvpilot init first')
-        if args.get('option')!='master_edit': raise ValueError('Usage: /cvpilot settings master_edit on|off')
+        if args.get('option')!='master_edit': raise ValueError('Usage: /cvpilot settings master_edit value:on|off|show')
         if args.get('value') not in ('on','off','show'): raise ValueError('Use on, off, or show')
         if args['value']!='show':
             with store.tx() as c:
@@ -30,7 +30,7 @@ def process(req, store):
         return {'text':f"Master editing: {'on' if user['master_edit'] else 'off'}"}
     if action=='init':
         username=args.get('github_username','')
-        if not USERNAME_RE.fullmatch(username): raise ValueError('Usage: /cvpilot init YOUR_GITHUB_USERNAME')
+        if not USERNAME_RE.fullmatch(username): raise ValueError('Usage: /cvpilot init github_username:YOUR_GITHUB_USERNAME')
         if user and user.get('repo'): return {'text':f"Already initialized: https://github.com/{user['repo']}"}
         # prevents racing initialization while first job is pending
         with store.tx() as c:
@@ -61,14 +61,14 @@ def process(req, store):
         if op=='get':
             return {'text':f"https://github.com/{user['repo']}/tree/main/master-resumes/{role} (private; must have repository access)"}
         if op in ('edit','update'):
-            if not user['master_edit']: raise ValueError('Master editing is off. Enable with /cvpilot settings master_edit on')
+            if not user['master_edit']: raise ValueError('Master editing is off. Enable with /cvpilot settings master_edit value:on')
             description=args.get('instructions','')
             if len(description)<8 or len(description)>2500: raise ValueError('Provide specific edit instructions (8-2500 chars)')
             jid=store.enqueue(uid,'master-edit',{'role':role,'instructions':description})
             return {'text':f'Master {role} edit queued as #{jid}. It will create a review branch, not change main.'}
         if op in ('upload','replace'):
             return {'text':'Binary Discord attachment handling is not installed yet. Upload your .tex/.pdf to the private repo’s master-resumes/'+role+'/ on main, then use /cvpilot profile sync. The bot will use them on the next task.'}
-        raise ValueError('Usage: /cvpilot master get ROLE | edit ROLE INSTRUCTIONS | upload ROLE')
+        raise ValueError('Usage: /cvpilot master get role:ROLE | edit role:ROLE instructions:TEXT | upload role:ROLE')
     if action=='profile':
         op=args.get('operation','')
         if op=='show': return {'text':f"https://github.com/{user['repo']}/blob/main/profile/MASTER_PROFILE.md"}
@@ -80,7 +80,7 @@ def process(req, store):
             if len(detail)<5 or len(detail)>2500: raise ValueError('Supply specific profile facts')
             jid=store.enqueue(uid,'profile-edit',{'instructions':detail})
             return {'text':f'Profile update queued as #{jid}. Unverified additions will require confirmation.'}
-        raise ValueError('Usage: /cvpilot profile show | sync | edit INSTRUCTIONS')
+        raise ValueError('Usage: /cvpilot profile show | sync | edit instructions:TEXT')
     if action=='answer':
         raise ValueError('Skill confirmation follow-ups are not yet implemented; run a new /cvpilot tailor after updating your profile with confirmed facts.')
     raise ValueError('Unsupported operation')

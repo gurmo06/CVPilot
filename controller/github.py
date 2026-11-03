@@ -1,7 +1,7 @@
 import json, os, subprocess, urllib.request, urllib.error
 from pathlib import Path
 
-ORG='CVPilot'
+ORG='CV-Pilot'
 
 class GitHubAPIError(RuntimeError):
     """GitHub API error with a structured HTTP status."""

@@ -6,7 +6,7 @@ from github import GitHub,GitHubAPIError,cmd,ssh_env
 
 ROOT=Path(os.environ.get('CVPILOT_STATE_DIR',str(Path.home()/'.local/state/cvpilot'))).resolve()
 KIT=Path(__file__).resolve().parent.parent
-ORG=os.environ.get('CVPILOT_GITHUB_ORG','CVPilot')
+ORG=os.environ.get('CVPILOT_GITHUB_ORG','CV-Pilot')
 IMAGE=os.environ.get('CVPILOT_DOCKER_IMAGE','openclaw-career-sandbox:1')
 MODEL=os.environ.get('CVPILOT_MODEL','ollama/gpt-oss:20b')
 
@@ -375,20 +375,23 @@ def repo_init(job,store):
     uid=job['discord_id']; github_user=json.loads(job['payload'])['github_username']
     old=store.user(uid)
     if old and old['repo']: return {'url':f'https://github.com/{old["repo"]}','note':'Already initialized'}
-    gh=GitHub(); name='career-'+uid
+    gh=GitHub(); name='cvpilot-'+uid
     org=gh.org  # GitHub client and worker must use exactly the same organization.
     intent=ROOT/'intents'/f'{uid}.json'
     intent.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
-    repo_info=gh.get_repo(name)
     if intent.exists():
         saved=json.loads(intent.read_text())
-        if (saved.get('name')!=name or saved.get('github_user')!=github_user
+        # Resume durable legacy intents against their original repository.
+        if (saved.get('name') not in (name, 'career-'+uid) or saved.get('github_user')!=github_user
                 or saved.get('org', org).lower()!=org.lower()):
             raise RuntimeError('Unfinished init has different parameters; operator review required')
+        name=saved['name']
+        repo_info=gh.get_repo(name)
         if repo_info is not None and not saved.get('marker'):
             raise RuntimeError('Legacy init intent cannot verify existing repo; operator review required')
     else:
         # No durable intent: an existing repo must never be adopted.
+        repo_info=gh.get_repo(name)
         if repo_info is not None:
             raise RuntimeError('Repository already exists without CVPilot intent; refusing takeover')
         saved={'name':name,'github_user':github_user,'org':org}
@@ -441,7 +444,7 @@ def repo_init(job,store):
     run_git(uid,repo,'config','user.email','cvpilot@users.noreply.github.com')
     run_git(uid,repo,'add','-A')
     if run_git(uid,repo,'status','--porcelain'):
-        run_git(uid,repo,'commit','-m','Initialize CVPilot career workspace')
+        run_git(uid,repo,'commit','-m','Initialize CVPilot workspace')
         run_git(uid,repo,'push','origin','main')
     protection='enabled'
 
@@ -576,6 +579,9 @@ def safe_output_filename(kind, rel, data):
 
 def run_resume_job(job,store):
     uid=job['discord_id'];jid=job['id'];kind=job['kind'];data=json.loads(job['payload'])
+    user=store.user(uid)
+    if not user or not user.get('repo'): raise RuntimeError('CVPilot repository is not initialized')
+    repo_url=f"https://github.com/{user['repo']}"
     if kind=='tailor':
         inputs=list(repopath(uid).glob('master-resumes/**/*.tex')) + list(repopath(uid).glob('master-resumes/**/*.pdf'))
         if not inputs: raise RuntimeError('No master resumes found. Upload a verified .tex or .pdf master to main in GitHub first.')
@@ -608,13 +614,13 @@ def run_resume_job(job,store):
     if not allowed:raise RuntimeError('Agent created no permitted output files')
     run_git(uid,trusted,'add','--',*allowed)
     changed=run_git(uid,trusted,'diff','--cached','--name-only').splitlines()
-    if not changed: return {'url':f'https://github.com/{ORG}/career-{uid}','note':'No material change was required.'}
+    if not changed: return {'url':repo_url,'note':'No material change was required.'}
     offending=[p for p in changed if not allowed_path(kind,p,data)]
     if offending:raise RuntimeError(f'Agent attempted unexpected edits: {offending[:6]}')
     run_git(uid,trusted,'commit','-m',f'CVPilot {kind} job {jid}')
     # Branch name is worker-generated; no user-provided Git ref is trusted.
     run_git(uid,trusted,'push','origin',f'HEAD:refs/heads/{branch}',timeout=90)
-    return {'url':f'https://github.com/{ORG}/career-{uid}/tree/{quote(branch,safe="/")}',
+    return {'url':f'{repo_url}/tree/{quote(branch,safe="/")}',
             'note':f'{kind} complete on branch {branch}. Review/merge from GitHub; main untouched.'}
 
 def cleanup_completed(uid, jid):
