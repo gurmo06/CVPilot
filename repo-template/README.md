@@ -32,20 +32,44 @@ Reusing a label explicitly replaces its active uploaded version; earlier
 versions remain in Git history. Upload a matching PDF/TeX pair together so the
 bot does not combine files from different versions.
 
-## Files and review history
+## Files and commit history
 
 - `master-resumes/<label>/resume.pdf` and/or `resume.tex`: source resumes.
 - `profile/MASTER_PROFILE.md` and `profile/profile_sources.json`: verified facts
   and their sources, including work, education, certifications and volunteering.
 - `applications/YYYY/job-<id>/{resume.tex,resume.pdf,job-url.txt}`: tailored output.
 
-CVPilot saves source uploads and generated changes on `cvpilot/<job-kind>/<id>`
-review branches. Successful Discord uploads are immediately available to later
-jobs; you do not need to merge a branch to begin tailoring. GitHub also keeps
-source history and provides a fallback download link. Once a source is updated
-or merged on `main`, that main version takes precedence over its earlier upload.
-The bot does not silently merge into `main`; branch protection depends on the
-GitHub plan. GitHub uploads to `main` are also supported and fetched before use.
+Successful uploads, resume edits, tailored applications and profile changes
+commit directly to `main` after validation. CVPilot creates no per-job branches.
+Each job links to its exact commit; saved downloads continue to retrieve the
+files from that commit even after later edits. Unchanged jobs create no extra
+commit. GitHub edits to `main` are fetched before work begins. Concurrent edits
+are preserved: a job refuses to overwrite a changed `main`, and you can submit
+it again against the current files. Interrupted pushes recover from a private
+publication journal without rerunning the agent or duplicating the commit.
+Existing GitHub protections are respected; direct pushes must be permitted by
+the repository's settings. New repositories retain force-push/deletion protection
+where supported, without requiring pull-request reviews.
+
+### Undo a change
+
+1. Run `/cvpilot history` (optionally `limit:<1–10>`) for recent main commit IDs.
+2. Run `/cvpilot revert commit:<ID>` using at least 7 characters of the ID.
+3. Review the private commit summary and changed files, select **Revert commit**,
+   and type **REVERT** within 2 minutes. Only the requesting user can confirm;
+   current server permissions are checked again.
+
+Revert adds a new commit reversing one selected commit. It preserves history,
+later nonconflicting changes and old downloadable files. It does not restore
+the whole repository to that point in time. Conflicts or a changed main stop the
+operation and require a fresh request. Initial commits, merge commits, the last
+reset commit and commits before that reset are excluded. Wait for your jobs to
+finish before requesting a revert. Cancel or let the prompt expire to make no
+changes. The command works in the server channel and DMs.
+
+Older job branches remain available as history. Older branch-based source
+uploads remain usable until that label is replaced or its main version changes;
+new source uploads are saved directly to main.
 
 The bot reads all available source resumes and verified profile facts. It
 adapts to the actual job and industry, keeps claims grounded in source evidence,

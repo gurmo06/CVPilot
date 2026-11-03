@@ -14,6 +14,7 @@ from dispatch import process
 from store import Store
 import github
 import worker
+import main_commits
 
 UID = '123456789012345678'
 
@@ -52,7 +53,7 @@ class BrandingTests(unittest.TestCase):
                     result = process({'sender_id': UID, 'action': action, 'args': args}, self.store)
                     self.assertIn(f'https://github.com/{repo}{suffix}', result['text'])
 
-    def test_resume_review_and_unchanged_links_use_stored_name(self):
+    def test_resume_commit_and_unchanged_links_use_stored_name(self):
         for prefix in ('career-', 'cvpilot-', 'custom-'):
             for changed in (False, True):
                 with self.subTest(prefix=prefix, changed=changed):
@@ -64,17 +65,22 @@ class BrandingTests(unittest.TestCase):
                     trusted = self.root / 'trusted'
                     def fake_git(uid, directory, *args, **kwargs):
                         return 'profile/MASTER_PROFILE.md' if changed and args == ('diff', '--cached', '--name-only') else ''
-                    with (mock.patch.object(worker, 'new_worktree', return_value=(task, 'cvpilot/profile-sync/1')),
+                    def publish(w,job,store,draft):
+                        return {**draft,'url':f'https://github.com/{store.user(UID)["repo"]}/commit/'+('a'*40)}
+                    with (mock.patch.object(worker, 'new_worktree', return_value=(task, 'main')),
+                          mock.patch.object(main_commits,'recover',return_value=None),
+                          mock.patch.object(main_commits,'begin',return_value={}),
+                          mock.patch.object(main_commits,'publish',side_effect=publish) as published,
                           mock.patch.object(worker, 'gitworktree', return_value=trusted),
                           mock.patch.object(worker, 'run', return_value='') as agent,
                           mock.patch.object(worker, 'run_git', side_effect=fake_git) as git):
                         result = worker.run_resume_job({'discord_id': UID, 'id': 1,
                             'kind': 'profile-sync', 'payload': '{}'}, self.store)
-                    suffix = '/tree/cvpilot/profile-sync/1' if changed else ''
+                    suffix = '/commit/'+('a'*40)
                     self.assertEqual(result['url'], f'https://github.com/{repo}{suffix}')
                     self.assertEqual(agent.call_args.args[0][3], f'career-{UID}')
-                    pushed = [call for call in git.call_args_list if 'push' in call.args]
-                    self.assertEqual(len(pushed), int(changed))
+                    published.assert_called_once()
+                    self.assertIn('committed to main' if changed else 'No material change',result['note'])
 
     def test_command_messages_use_registered_native_options(self):
         result = process({'sender_id': UID, 'action': 'repo'}, self.store)
@@ -95,6 +101,12 @@ class BrandingTests(unittest.TestCase):
         ssh = github.ssh_env('/test/key', '/test/known_hosts')['GIT_SSH_COMMAND']
         self.assertIn('ssh -F /dev/null', ssh)
         self.assertIn('StrictHostKeyChecking=yes', ssh)
+        with mock.patch.object(gh,'api',return_value={}) as api:
+            gh.protect_main('cvpilot-'+UID)
+        protections=api.call_args.args[2]
+        self.assertIsNone(protections['required_pull_request_reviews'])
+        self.assertFalse(protections['allow_force_pushes'])
+        self.assertFalse(protections['allow_deletions'])
 
     def test_discord_help_only_advertises_registered_commands(self):
         spec = importlib.util.spec_from_file_location('branding_discord', APP.parent / 'discord/cvpilot_discord.py')
@@ -113,7 +125,7 @@ class BrandingTests(unittest.TestCase):
             self.assertTrue(any(command == name or command.startswith(name + ' ') for name in names), command)
         self.assertNotIn('/career', text)
         self.assertEqual(len([cmd for cmd in listener.cvpilot.walk_commands()
-                              if not hasattr(cmd, 'commands')]), 14)
+                              if not hasattr(cmd, 'commands')]), 16)
 
 
 if __name__ == '__main__':

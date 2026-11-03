@@ -152,32 +152,33 @@ async def help_command(interaction: discord.Interaction):
         return
     help_text = (
         '**CVPilot — Quick Help**\n'
-        'Use commands in #cvpilot or DM CVPilot after receiving the CVPilot User role. Server membership and permissions are checked in DMs.\n\n'
+        'Use #cvpilot or DM CVPilot with the server-issued role. DM permissions are checked each time.\n\n'
         '**Getting started**\n'
         '`/cvpilot init github_username:<your GitHub username>` — Create your private repo.\n'
         '`/cvpilot repo` — View the repository link.\n'
         '`/cvpilot status` — Check queued work and results.\n\n'
         '**Applications**\n'
         '`/cvpilot tailor url:<job posting URL>` — Get a tailored one-page PDF and TeX by private DM.\n'
-        '`/cvpilot download job_id:<id>` — Download completed resume files here privately; omit the ID for the latest.\n\n'
+        '`/cvpilot download job_id:<id>` — Get saved files privately; omit ID for latest.\n\n'
         '**Master resumes**\n'
         '`/cvpilot master get label:<label>` — Download your saved source resume here privately.\n'
-        '`/cvpilot master upload file:<PDF or TeX> label:<label> companion:<optional matching file>` — Upload a source resume.\n'
+        '`/cvpilot master upload file:<PDF or TeX> label:<label> companion:<optional file>` — Upload a source.\n'
         '`/cvpilot master edit label:<label> instructions:<change>` — Propose edits.\n'
-        'Labels default to `general`. Choose any label: teaching, healthcare, sales, arts, or your own. Reusing a label explicitly replaces its active uploaded version.\n\n'
+        'Labels default to `general`; choose healthcare, sales, arts or any label. Reusing a label replaces its current upload.\n\n'
         '**Master profile**\n'
         '`/cvpilot profile show` — View your profile.\n'
         '`/cvpilot profile sync` — Sync verified facts from masters.\n'
         '`/cvpilot profile edit instructions:<change>` — Propose a profile update.\n\n'
-        '**Reset**\n'
+        '**History and undo**\n'
+        '`/cvpilot history limit:<1–10>` — List recent main commits.\n'
+        '`/cvpilot revert commit:<ID>` — Undo one commit; requires typing REVERT.\n'
         '`/cvpilot reset` — Restore the template and delete other branches; requires typing RESET.\n\n'
         '**Permissions**\n'
         '`/cvpilot settings master_edit value:<on|off|show>` — Manage master edit permission.\n\n'
-        'Master edits must be requested explicitly. CVPilot does not silently merge into main. '
-        'PDF and UTF-8 TeX attachments are supported, up to 8 MiB each. Use companion to upload a matching PDF/TeX pair together. '
-        'A TeX-only upload automatically compiles to PDF; both files are available through master get or download. '
-        'New uploads are available after their job completes. GitHub keeps review history; no manual merge is needed to start tailoring. '
-        'If DMs are blocked, use /cvpilot download. DOCX uploads are not supported.'
+        'Validated changes commit directly to main. Revert adds an undo commit and preserves history. '
+        'Master edits require opt-in and an explicit request. PDF/UTF-8 TeX: 8 MiB each; DOCX unsupported. '
+        'TeX-only uploads compile to PDF; master get returns both files. '
+        'Use companion for a matching PDF/TeX pair. Wait for upload completion before tailoring.'
     )
     await private_reply(interaction,help_text)
 
@@ -192,28 +193,35 @@ class ResetModal(discord.ui.Modal, title='Confirm repository reset'):
     async def on_submit(self, interaction: discord.Interaction):
         view=self.reset_view
         if interaction.user.id!=view.sender_id:
-            await private_reply(interaction,'Only the user who requested this reset can confirm it.')
+            await private_reply(interaction,f'Only the user who requested this {view.action} can confirm it.')
             return
         if not await public_authorized(interaction):return
         await defer_private(interaction)
         try:
-            response=await request_controller(interaction.user.id,'reset',
+            response=await request_controller(interaction.user.id,view.action,
                 {'operation':'confirm','token':view.token,'confirmation':self.verification.value})
             await private_reply(interaction,str(response.get('text','No response from CVPilot')))
             if response.get('ok'):await view.close_prompt()
         except (OSError,TimeoutError,ValueError,RuntimeError) as exc:
-            print(f'[cvpilot] reset confirmation error: {type(exc).__name__}: {exc}',flush=True)
-            await private_reply(interaction,'Could not confirm the reset. Check /cvpilot status before trying again.')
+            print(f'[cvpilot] {view.action} confirmation error: {type(exc).__name__}: {exc}',flush=True)
+            await private_reply(interaction,f'Could not confirm the {view.action}. Check /cvpilot status before trying again.')
+
+
+class RevertModal(ResetModal, title='Confirm commit revert'):
+    verification=discord.ui.TextInput(label='Type REVERT to undo this commit',placeholder='REVERT',
+                                      min_length=6,max_length=6,required=True)
 
 
 class ResetView(discord.ui.View):
+    action='reset'
+    modal_type=ResetModal
     def __init__(self, sender_id: int, token: str):
         super().__init__(timeout=120)
         self.sender_id=sender_id;self.token=token;self.message=None
 
     async def interaction_check(self, interaction: discord.Interaction):
         if interaction.user.id!=self.sender_id:
-            await private_reply(interaction,'Only the user who requested this reset can use this confirmation.')
+            await private_reply(interaction,f'Only the user who requested this {self.action} can use this confirmation.')
             return False
         return True
 
@@ -232,36 +240,62 @@ class ResetView(discord.ui.View):
         if not await self.interaction_check(interaction):return
         # Opening a modal must be the initial response. Permissions are checked
         # again when the user submits the typed confirmation.
-        await interaction.response.send_modal(ResetModal(self))
+        await interaction.response.send_modal(self.modal_type(self))
 
     @discord.ui.button(label='Cancel',style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not await self.interaction_check(interaction):return
         await defer_private(interaction)
         try:
-            response=await request_controller(interaction.user.id,'reset',{'operation':'cancel','token':self.token})
+            response=await request_controller(interaction.user.id,self.action,{'operation':'cancel','token':self.token})
             await private_reply(interaction,str(response.get('text','No response from CVPilot')))
             await self.close_prompt()
         except (OSError,TimeoutError,ValueError,RuntimeError) as exc:
-            print(f'[cvpilot] reset cancellation error: {type(exc).__name__}: {exc}',flush=True)
+            print(f'[cvpilot] {self.action} cancellation error: {type(exc).__name__}: {exc}',flush=True)
             await private_reply(interaction,'Could not cancel this confirmation. Check /cvpilot status; confirmations expire after 2 minutes.')
 
 
 @cvpilot.command(name='reset', description='Restore the initial repository template and delete other branches after confirmation')
 async def reset(interaction: discord.Interaction):
+    await prepare_repository_change(interaction,'reset',ResetView)
+
+
+class RevertView(ResetView):
+    action='revert'
+    modal_type=RevertModal
+
+    @discord.ui.button(label='Revert commit',style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await self.interaction_check(interaction):return
+        await interaction.response.send_modal(self.modal_type(self))
+
+
+async def prepare_repository_change(interaction, action, view_type, **args):
     if not await public_authorized(interaction):return
     await defer_private(interaction)
     try:
-        response=await request_controller(interaction.user.id,'reset',{'operation':'prepare'})
+        response=await request_controller(interaction.user.id,action,{'operation':'prepare',**args})
         if not response.get('ok'):
-            await private_reply(interaction,str(response.get('text','Reset is unavailable')))
+            await private_reply(interaction,str(response.get('text','Operation is unavailable')))
             return
-        view=ResetView(interaction.user.id,response['confirmation_token'])
+        view=view_type(interaction.user.id,response['confirmation_token'])
         view.message=await interaction.followup.send(str(response['text']),ephemeral=True,view=view,wait=True,
                                                     allowed_mentions=discord.AllowedMentions.none())
     except (OSError,TimeoutError,ValueError,RuntimeError) as exc:
-        print(f'[cvpilot] reset preparation error: {type(exc).__name__}: {exc}',flush=True)
-        await private_reply(interaction,'Could not prepare the reset. Check /cvpilot status or contact the operator.')
+        print(f'[cvpilot] {action} preparation error: {type(exc).__name__}: {exc}',flush=True)
+        await private_reply(interaction,f'Could not prepare the {action}. Check /cvpilot status or contact the operator.')
+
+
+@cvpilot.command(name='history', description='List recent commits on your repository main branch')
+@app_commands.describe(limit='Number of recent commits to show (1–10)')
+async def history(interaction: discord.Interaction, limit: app_commands.Range[int,1,10] = 8):
+    await invoke(interaction,'history',limit=limit)
+
+
+@cvpilot.command(name='revert', description='Undo one main commit with a new commit after confirmation')
+@app_commands.describe(commit='Commit ID from /cvpilot history (at least 7 characters)')
+async def revert(interaction: discord.Interaction, commit: str):
+    await prepare_repository_change(interaction,'revert',RevertView,commit=commit)
 
 
 @cvpilot.command(name='init', description='Initialize a private GitHub repository and workspace')
@@ -294,7 +328,7 @@ master = app_commands.Group(name='master', description='Upload, download, or rev
 async def master_get(interaction: discord.Interaction, label: str = 'general'):
     await invoke(interaction, 'master', operation='get', role=label)
 
-@master.command(name='edit', description='Request a source-resume edit on a new review branch')
+@master.command(name='edit', description='Request a source-resume edit committed to main after validation')
 @app_commands.describe(label='Your resume label; default general', instructions='Specific requested changes (must be factual)')
 async def master_edit(interaction: discord.Interaction, instructions: str, label: str = 'general'):
     await invoke(interaction, 'master', operation='edit', role=label, instructions=instructions)
@@ -454,14 +488,14 @@ if __name__ == '__main__':
     import sys
     if '--check' in sys.argv:
         names = {cmd.qualified_name for cmd in cvpilot.walk_commands()}
-        expected = {'cvpilot help', 'cvpilot init', 'cvpilot repo', 'cvpilot status', 'cvpilot tailor', 'cvpilot download', 'cvpilot reset',
+        expected = {'cvpilot help', 'cvpilot init', 'cvpilot repo', 'cvpilot status', 'cvpilot tailor', 'cvpilot download', 'cvpilot reset', 'cvpilot history', 'cvpilot revert',
                     'cvpilot master get', 'cvpilot master edit', 'cvpilot master upload',
                     'cvpilot profile show', 'cvpilot profile sync', 'cvpilot profile edit',
                     'cvpilot settings master_edit'}
         missing = expected - names
         if missing:
             raise SystemExit('Missing native subcommands: ' + ', '.join(sorted(missing)))
-        print('OK: 14 server/DM CVPilot subcommands and 4 server-only admin diagnostics defined')
+        print('OK: 16 server/DM CVPilot subcommands and 4 server-only admin diagnostics defined')
         sys.exit(0)
     if not TOKEN or TOKEN == 'REPLACE_WITH_TOKEN':
         raise SystemExit('Set CVPILOT_DISCORD_TOKEN in ~/.config/cvpilot/controller.env')

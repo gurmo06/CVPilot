@@ -1,6 +1,5 @@
 import json, os, re, secrets, shutil, subprocess, time, hashlib, tempfile
 from pathlib import Path
-from urllib.parse import quote
 from store import Store
 from github import GitHub,GitHubAPIError,cmd,ssh_env
 from resumes import (label, inbox_path, staged_files, read_blob, artifact_files,
@@ -455,7 +454,7 @@ def repo_init(job,store):
         print(f'CVPilot archived incomplete checkout at {archived}',flush=True)
     if not repo.exists():
         run(['git','clone',f'git@github.com:{org}/{name}.git',str(repo)],env=git_env(uid),timeout=70)
-    # Only provisioning may seed main. Normal worker tasks cannot touch main.
+    # Provisioning seeds main; validated jobs subsequently append commits.
     for d in ('master-resumes/general','profile','applications'):
         (repo/d).mkdir(parents=True,exist_ok=True)
     for file in (KIT/'repo-template').rglob('*'):
@@ -534,10 +533,9 @@ def new_worktree(uid,jid,kind):
     repo=repopath(uid);task=taskdir(uid,jid);trusted=gitworktree(uid,jid)
     task.parent.mkdir(parents=True,exist_ok=True)
     trusted.parent.mkdir(parents=True,exist_ok=True)
-    branch=f'cvpilot/{kind}/{jid}'
     run_git(uid,repo,'fetch','origin','main')
     if not trusted.exists():
-        run_git(uid,repo,'worktree','add','-b',branch,str(trusted),'origin/main')
+        run_git(uid,repo,'worktree','add','--detach',str(trusted),'origin/main')
     run_git(uid,trusted,'config','user.name','CVPilot')
     run_git(uid,trusted,'config','user.email','cvpilot@users.noreply.github.com')
     # No Git metadata (.git) enters the model's mount. A plain-file work copy
@@ -547,7 +545,7 @@ def new_worktree(uid,jid,kind):
         shutil.copytree(trusted,task,ignore=shutil.ignore_patterns('.git'),symlinks=True)
     if any(file.is_symlink() for file in task.rglob('*')):
         raise RuntimeError('Symlinks are forbidden in resume source snapshots')
-    return task,branch
+    return task,'main'
 
 def agent_prompt(job, task):
     uid=job['discord_id'];jid=job['id'];kind=job['kind'];data=json.loads(job['payload'])
@@ -556,7 +554,7 @@ def agent_prompt(job, task):
         url=data['url'];year=time.gmtime().tm_year
         folder=f'applications/{year}/job-{jid}'
         return header+f'''\n
-TASK: Tailor a resume for the *exact* job posting URL: {url}. Use web_fetch; if fetching fails, do not manufacture its requirements. Review all source material in master-resumes/ and profile/MASTER_PROFILE.md. Synchronize verified facts from any newly updated master into profile/MASTER_PROFILE.md and profile/profile_sources.json, preserving provenance; those profile changes must stay on this review branch. Use the closest existing TeX master as template and pull verified details from all resumes. If only a PDF is available, create a clean, readable TeX layout appropriate to the person's field; do not claim to reproduce its original formatting exactly. Resume labels are user-defined, not a fixed list of professions. Tailor for the actual industry and role, including nontechnical careers, using only source evidence. Create exactly these deliverables under /career/tasks/{jid}/{folder}/ : resume.tex, job-url.txt, and optionally notes.md. Preserve the master style. Do not alter masters. Write a complete compilable TeX source. The trusted worker will compile into resume.pdf, verify one page, and push the branch. If a necessary unverified skill is relevant, omit it and note in notes.md what to ask the user; do not add it before confirmation. Do not commit or push.'''
+TASK: Tailor a resume for the *exact* job posting URL: {url}. Use web_fetch; if fetching fails, do not manufacture its requirements. Review all source material in master-resumes/ and profile/MASTER_PROFILE.md. Synchronize verified facts from any newly updated master into profile/MASTER_PROFILE.md and profile/profile_sources.json, preserving provenance; those profile changes are committed to main after validation. Use the closest existing TeX master as template and pull verified details from all resumes. If only a PDF is available, create a clean, readable TeX layout appropriate to the person's field; do not claim to reproduce its original formatting exactly. Resume labels are user-defined, not a fixed list of professions. Tailor for the actual industry and role, including nontechnical careers, using only source evidence. Create exactly these deliverables under /career/tasks/{jid}/{folder}/ : resume.tex, job-url.txt, and optionally notes.md. Preserve the master style. Do not alter masters. Write a complete compilable TeX source. The trusted worker will compile into resume.pdf, verify one page, and commit the validated changes to main. If a necessary unverified skill is relevant, omit it and note in notes.md what to ask the user; do not add it before confirmation. Do not commit or push.'''
     if kind=='master-edit':
         return header+f'''\n
 TASK: The user explicitly enabled and requested editing their master resume role {data['role']}. Instructions: {data['instructions']}. Modify ONLY master-resumes/{data['role']}/ files and, where substantiated, profile/MASTER_PROFILE.md plus profile/profile_sources.json. The user has authorized this specific modification. Modify .tex and keep the PDF one page; the worker will compile and validate. If the original is only a PDF, do not pretend to preserve its exact original layout. Do not commit or push.'''
@@ -684,6 +682,7 @@ def _source_directory(worktree, role):
 
 def apply_uploaded_sources(uid, store, task):
     for role, result in store.latest_uploads(uid).items():
+        if result.get('on_main') is True:continue
         directory=_source_directory(task,role)
         current={}
         for name in ('resume.pdf','resume.tex'):
@@ -699,23 +698,19 @@ def apply_uploaded_sources(uid, store, task):
 
 
 def run_upload_job(job, store):
+    import main_commits,sys
+    w=sys.modules[__name__]
+    recovered=main_commits.recover(w,job,store)
+    if recovered is not None:return recovered
     uid=job['discord_id'];jid=job['id'];payload=json.loads(job['payload'])
     role=label(payload['role']);files=staged_files(ROOT,uid,payload)
     user=store.user(uid)
     if not user or not user.get('repo'):raise ValueError('Initialize CVPilot first')
-    task,branch=new_worktree(uid,jid,'master-upload')
+    task,_=new_worktree(uid,jid,'master-upload')
+    main_commits.begin(w,job,store)
     files=compile_uploaded_master(task,files,inbox_path(ROOT,uid,payload['upload_id'])/'compiled.json')
     trusted=gitworktree(uid,jid)
     directory=_source_directory(trusted,role)
-    baseline=inbox_path(ROOT,uid,payload['upload_id'])/'baseline.json'
-    if baseline.exists():
-        base=json.loads(baseline.read_text())
-    else:
-        base={}
-        for name in ('resume.pdf','resume.tex'):
-            contents=read_blob(repopath(uid),'origin/main',f'master-resumes/{role}/{name}')
-            base[name]=hashlib.sha256(contents).hexdigest() if contents is not None else None
-        _write_intent(baseline,base)
     changed_paths=[]
     for name in ('resume.pdf','resume.tex'):
         target=directory/name
@@ -725,14 +720,10 @@ def run_upload_job(job, store):
         elif target.exists():
             target.unlink();changed_paths.append(f'master-resumes/{role}/{name}')
     run_git(uid,trusted,'add','-f','-A','--',*changed_paths)
-    if run_git(uid,trusted,'diff','--cached','--name-only'):
-        run_git(uid,trusted,'commit','-m',f'CVPilot resume upload {role} job {jid}')
-    commit=run_git(uid,trusted,'rev-parse','HEAD')
-    run_git(uid,trusted,'push','origin',f'HEAD:refs/heads/{branch}',timeout=90)
-    return {'url':f'https://github.com/{user["repo"]}/tree/{quote(branch,safe="/")}',
+    return main_commits.publish(w,job,store,{
             'note':f'Resume saved under {role} and ready for tailoring. '+('TeX compiled to PDF. ' if (inbox_path(ROOT,uid,payload['upload_id'])/'compiled.json').exists() else '')+f'Use /cvpilot master get label:{role} to download it. Earlier versions remain in Git history.',
-            'label':role,'commit':commit,'base_files':base,
-            'artifacts':[{'path':f'master-resumes/{role}/{name}'} for name in sorted(files)]}
+            'label':role,
+            'artifacts':[{'path':f'master-resumes/{role}/{name}'} for name in sorted(files)]})
 
 
 def download_job(uid, job_id, store):
@@ -771,11 +762,16 @@ def download_master(uid, role, store):
 
 
 def run_resume_job(job,store):
+    import main_commits,sys
+    w=sys.modules[__name__]
+    recovered=main_commits.recover(w,job,store)
+    if recovered is not None:return recovered
     uid=job['discord_id'];jid=job['id'];kind=job['kind'];data=json.loads(job['payload'])
     user=store.user(uid)
     if not user or not user.get('repo'): raise RuntimeError('CVPilot repository is not initialized')
     repo_url=f"https://github.com/{user['repo']}"
-    task,branch=new_worktree(uid,jid,kind)
+    task,_=new_worktree(uid,jid,kind)
+    main_commits.begin(w,job,store)
     apply_uploaded_sources(uid,store,task)
     if kind=='tailor':
         inputs=list(task.glob('master-resumes/**/*.tex')) + list(task.glob('master-resumes/**/*.pdf'))
@@ -805,18 +801,20 @@ def run_resume_job(job,store):
         dest.parent.mkdir(parents=True,exist_ok=True)
         shutil.copy2(file,dest)
         allowed.append(rel)
+    # Include requested deletions within the same strict output allowlist.
+    for rel in filter(None,run_git(uid,trusted,'ls-files','-z').split('\0')):
+        if not allowed_path(kind,rel,data) or not safe_output_filename(kind,rel,data):continue
+        if not (task/rel).exists():
+            (trusted/rel).unlink(missing_ok=True)
+            allowed.append(rel)
     if not allowed:raise RuntimeError('Agent created no permitted output files')
-    run_git(uid,trusted,'add','-f','--',*allowed)
+    run_git(uid,trusted,'add','-f','-A','--',*allowed)
     changed=run_git(uid,trusted,'diff','--cached','--name-only').splitlines()
-    if not changed: return {'url':repo_url,'note':'No material change was required.'}
     offending=[p for p in changed if not allowed_path(kind,p,data)]
     if offending:raise RuntimeError(f'Agent attempted unexpected edits: {offending[:6]}')
-    run_git(uid,trusted,'commit','-m',f'CVPilot {kind} job {jid}')
-    # Branch name is worker-generated; no user-provided Git ref is trusted.
-    run_git(uid,trusted,'push','origin',f'HEAD:refs/heads/{branch}',timeout=90)
     # Return a matching PDF/TeX pair, even if a master-edit label has multiple resumes.
-    pdfs=sorted(path for path in allowed if path.endswith('.pdf'))
-    texs=sorted(path for path in allowed if path.endswith('.tex'))
+    pdfs=sorted(path for path in allowed if path.endswith('.pdf') and (trusted/path).is_file())
+    texs=sorted(path for path in allowed if path.endswith('.tex') and (trusted/path).is_file())
     delivered=[]
     if pdfs:
         delivered.append(pdfs[0])
@@ -824,13 +822,13 @@ def run_resume_job(job,store):
         if companion in texs:delivered.append(companion)
     elif texs:delivered.append(texs[0])
     artifacts=[{'path':path} for path in delivered]
-    return {'url':f'{repo_url}/tree/{quote(branch,safe="/")}',
-            'note':f'{kind} complete. Resume files are attached when available. Use /cvpilot download job_id:{jid} to retrieve them again. Changes remain on review branch {branch}.',
-            'commit':run_git(uid,trusted,'rev-parse','HEAD'),'artifacts':artifacts}
+    note=(f'{kind} complete. Changes committed to main. Resume files are attached when available. Use /cvpilot download job_id:{jid} to retrieve them again.'
+          if changed else 'No material change was required.')
+    return main_commits.publish(w,job,store,{'note':note,'artifacts':artifacts})
 
 
 def cleanup_completed(uid, jid):
-    # Publish succeeded; branch files live on GitHub. Drop bulky local TeX
+    # Publish succeeded; committed files live on GitHub. Drop bulky local TeX
     # scratch and checkout copies, retaining source repo + central SQLite logs.
     task=taskdir(uid,jid)
     trusted=gitworktree(uid,jid)
@@ -846,6 +844,9 @@ def work(job,store):
     if job['kind']=='reset':
         from reset_repo import reset_repository
         return reset_repository(job,store)
+    if job['kind']=='revert':
+        from repo_history import revert_commit
+        return revert_commit(job,store)
     if job['kind']=='master-edit':
         u=store.user(job['discord_id'])
         if not u or not u['master_edit']:raise RuntimeError('Master editing was disabled before this job began')

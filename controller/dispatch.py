@@ -5,7 +5,7 @@ from resumes import label, stage_upload, MAX_PACKET_BYTES
 
 UID_RE=re.compile(r'^[0-9]{16,22}$')
 USERNAME_RE=re.compile(r'^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$')
-ALLOWED={'init','repo','settings','status','tailor','master','profile','answer','download','reset'}
+ALLOWED={'init','repo','settings','status','tailor','master','profile','answer','download','reset','history','revert'}
 
 RESET_CONFIRM_TTL=120
 _RESET_CONFIRMATIONS={}
@@ -75,6 +75,12 @@ def process(req, store):
     if not user or not user.get('repo'): raise ValueError('Please initialize with /cvpilot init first')
     if action=='reset':return reset_request(uid,args,user,store)
     if store.reset_blocked(uid):raise ValueError('Repository reset is pending or incomplete. Check /cvpilot status and retry /cvpilot reset if it failed.')
+    if action=='history':
+        from repo_history import history
+        return history(uid,user,args.get('limit',8))
+    if action=='revert':
+        from repo_history import request
+        return request(uid,args,user,store)
     if action=='download':
         from worker import download_job
         return download_job(uid,args.get('job_id'),store)
@@ -104,7 +110,7 @@ def process(req, store):
             description=args.get('instructions','')
             if len(description)<8 or len(description)>2500: raise ValueError('Provide specific edit instructions (8-2500 chars)')
             jid=store.enqueue(uid,'master-edit',{'role':role,'instructions':description})
-            return {'text':f'Master {role} edit queued as #{jid}. It will create a review branch, not change main.'}
+            return {'text':f'Master {role} edit queued as #{jid}. Validated changes will be committed to main.'}
         if op in ('upload','replace'):
             import shutil
             from resumes import inbox_path
@@ -122,7 +128,7 @@ def process(req, store):
         if op=='show': return {'text':f"https://github.com/{user['repo']}/blob/main/profile/MASTER_PROFILE.md"}
         if op=='sync':
             jid=store.enqueue(uid,'profile-sync',{})
-            return {'text':f'Profile sync queued as #{jid}; changes go to a review branch.'}
+            return {'text':f'Profile sync queued as #{jid}; validated changes will be committed to main.'}
         if op=='edit':
             detail=args.get('instructions','')
             if len(detail)<5 or len(detail)>2500: raise ValueError('Supply specific profile facts')

@@ -168,6 +168,7 @@ def active_upload_files(repo, result, current_files):
     The upload records hashes of the source on main at upload time. A later
     merge/edit on main wins, preventing an old Discord upload from overwriting it.
     """
+    if result.get('on_main') is True:return None
     role = label(result['label'])
     base = result.get('base_files', {})
     if set(base) != {'resume.pdf', 'resume.tex'}:

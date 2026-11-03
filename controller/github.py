@@ -57,7 +57,7 @@ class GitHub:
         # GitHub plan/settings may reject this request; report failure clearly.
         return self.api('PUT',f'/repos/{self.org}/{name}/branches/main/protection',{
              'required_status_checks':None,'enforce_admins':True,
-             'required_pull_request_reviews':{'required_approving_review_count':1,'dismiss_stale_reviews':True},
+             'required_pull_request_reviews':None,
              'restrictions':None,'required_linear_history':False,
              'allow_force_pushes':False,'allow_deletions':False,
         })

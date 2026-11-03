@@ -108,14 +108,33 @@ class ResumeWorkflowTests(unittest.TestCase):
         self.store.finish(job['id'],'done',outcome)
         return job,outcome
 
-    def test_upload_is_reviewed_immediately_usable_and_downloadable(self):
+    def legacy_upload(self,role):
+        """Seed a pre-main-publication upload to retain compatibility coverage."""
+        jid=self.store.enqueue(UID,'master-upload',{})
+        branch=f'cvpilot/master-upload/{jid}'
+        self.git('-C',str(self.seed),'switch','-c',branch)
+        directory=self.seed/'master-resumes'/role;directory.mkdir(parents=True)
+        for name,data in (('resume.pdf',PDF),('resume.tex',TEX)):(directory/name).write_bytes(data)
+        self.git('-C',str(self.seed),'add','-f','.')
+        self.git('-C',str(self.seed),'commit','-m','Legacy upload')
+        commit=self.git('-C',str(self.seed),'rev-parse','HEAD')
+        self.git('-C',str(self.seed),'push','origin',branch)
+        self.git('-C',str(self.seed),'switch','main')
+        worker.run_git(UID,worker.repopath(UID),'fetch','origin',branch)
+        result={'label':role,'commit':commit,'base_files':{'resume.pdf':None,'resume.tex':None},
+                'artifacts':[{'path':f'master-resumes/{role}/{name}'} for name in ('resume.pdf','resume.tex')]}
+        self.store.finish(jid,'done',result)
+        return self.store.job(jid),result
+
+    def test_upload_commits_to_main_immediately_usable_and_downloadable(self):
         job,result=self.upload('healthcare')
-        self.assertEqual(self.git('-C',str(self.remote),'rev-parse','main'),self.original_main)
+        self.assertEqual(self.git('-C',str(self.remote),'rev-parse','main'),result['commit'])
+        self.assertEqual(self.git('-C',str(self.remote),'for-each-ref','--format=%(refname)','refs/heads'),'refs/heads/main')
         self.assertEqual(result['label'],'healthcare')
-        self.assertIn('/tree/cvpilot/master-upload/',result['url'])
+        self.assertIn('/commit/'+result['commit'],result['url'])
         saved=self.call('master',{'operation':'get','label':'healthcare'})
         self.assertEqual(resumes.validate_files(saved['attachments']),{'resume.pdf':PDF,'resume.tex':TEX})
-        self.assertIn('/tree/'+result['commit']+'/master-resumes/healthcare',saved['text'])
+        self.assertIn('/tree/main/master-resumes/healthcare',saved['text'])
         task,_=worker.new_worktree(UID,100,'profile-sync')
         worker.apply_uploaded_sources(UID,self.store,task)
         self.assertEqual((task/'master-resumes/healthcare/resume.pdf').read_bytes(),PDF)
@@ -155,7 +174,7 @@ class ResumeWorkflowTests(unittest.TestCase):
         task,_=worker.new_worktree(UID,103,'profile-sync')
         worker.apply_uploaded_sources(UID,self.store,task)
         self.assertEqual((task/'master-resumes/teaching/resume.pdf').read_bytes(),PDF)
-        self.assertEqual(self.git('-C',str(self.remote),'rev-parse','main'),self.original_main)
+        self.assertEqual(self.git('-C',str(self.remote),'rev-parse','main'),result['commit'])
 
     def test_supplied_pdf_only_and_pdf_tex_pair_skip_compilation(self):
         with mock.patch.object(worker,'compile_pdf',side_effect=AssertionError('unexpected compilation')):
@@ -216,7 +235,7 @@ class ResumeWorkflowTests(unittest.TestCase):
             self.call('download',{'job_id':pending})
 
     def test_main_updates_take_precedence_over_earlier_uploads(self):
-        self.upload('teaching')
+        self.legacy_upload('teaching')
         directory=self.seed/'master-resumes/teaching';directory.mkdir(parents=True)
         newer=TEX+b' newer verified main source'
         (directory/'resume.tex').write_bytes(newer)
@@ -231,7 +250,7 @@ class ResumeWorkflowTests(unittest.TestCase):
         self.assertEqual(resumes.validate_files(downloaded['attachments']),{'resume.tex':newer})
 
     def test_merged_upload_allows_later_master_edits_on_main(self):
-        job,result=self.upload('general')
+        job,result=self.legacy_upload('general')
         self.git('-C',str(self.seed),'fetch','origin',f'cvpilot/master-upload/{job["id"]}')
         self.git('-C',str(self.seed),'merge','--ff-only','FETCH_HEAD')
         (self.seed/'master-resumes/general/resume.tex').write_bytes(TEX+b' corrected main version')
@@ -269,8 +288,9 @@ class ResumeWorkflowTests(unittest.TestCase):
         self.assertEqual(dict(resumes.artifact_files(worker.repopath(UID),result)),{'resume.pdf':PDF,'resume.tex':TEX})
         worker.cleanup_completed(UID,200)
         self.assertEqual(len(resumes.artifact_files(worker.repopath(UID),result)),2)
-        self.assertEqual(self.git('-C',str(self.remote),'rev-parse','main'),
-                         self.git('-C',str(self.seed),'rev-parse','HEAD'))
+        self.assertEqual(self.git('-C',str(self.remote),'rev-parse','main'),result['commit'])
+        self.git('-C',str(self.remote),'merge-base','--is-ancestor',
+                 self.git('-C',str(self.seed),'rev-parse','HEAD'),result['commit'])
 
     def test_queue_payload_contains_no_file_bytes_and_enqueue_failure_cleans_staging(self):
         self.call('master',{'operation':'upload','files':attachments(('cv.pdf',PDF))})
@@ -283,7 +303,7 @@ class ResumeWorkflowTests(unittest.TestCase):
                 self.call('master',{'operation':'upload','files':attachments(('cv.pdf',PDF))})
         self.assertEqual(set((self.state/'resume-inbox'/UID).iterdir()),before)
 
-    def test_upload_retry_reuses_branch_without_an_extra_commit(self):
+    def test_upload_retry_reuses_main_commit_without_an_extra_commit(self):
         self.call('master',{'operation':'upload','files':attachments(('cv.pdf',PDF))})
         job=self.store.claim()
         first=worker.run_upload_job(job,self.store)
@@ -291,7 +311,7 @@ class ResumeWorkflowTests(unittest.TestCase):
         again=self.store.claim()
         second=worker.run_upload_job(again,self.store)
         self.assertEqual(first['commit'],second['commit'])
-        self.assertEqual(first['base_files'],second['base_files'])
+        self.assertTrue(first['on_main']);self.assertTrue(second['on_main'])
 
     def test_download_rejects_symlinks_and_arbitrary_artifact_paths(self):
         (self.seed/'master-resumes/general').mkdir(parents=True)

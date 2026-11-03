@@ -18,12 +18,12 @@ def repository_identity(w, full_name):
     if (not isinstance(repo,dict) or repo.get('private') is not True
             or (repo.get('owner') or {}).get('login','').lower()!=org.lower()
             or repo.get('name','').lower()!=name.lower() or type(repo.get('id')) is not int):
-        raise ValueError('Cannot verify the registered private repository; refusing reset')
+        raise ValueError('Cannot verify the registered private repository; refusing this operation')
     description=repo.get('description') or ''
     if not description.startswith('CVPilot managed workspace [') or not description.endswith(']'):
-        raise ValueError('Cannot verify CVPilot repository ownership; refusing reset')
+        raise ValueError('Cannot verify CVPilot repository ownership; refusing this operation')
     if repo.get('default_branch')!='main':
-        raise ValueError('Set the repository default branch to main before resetting; no repository settings were changed.')
+        raise ValueError('Set the repository default branch to main before this operation; no repository settings were changed.')
     return repo['id']
 
 
@@ -33,7 +33,7 @@ def verified_origin(w, uid, repo, full_name):
     fetch=w.run_git(uid,repo,'remote','get-url','--all','origin').splitlines()
     push=w.run_git(uid,repo,'remote','get-url','--push','--all','origin').splitlines()
     if len(fetch)!=1 or fetch[0] not in allowed or push!=fetch:
-        raise ValueError('Local Git origin does not match the registered repository; refusing reset')
+        raise ValueError('Local Git origin does not match the registered repository; refusing this operation')
     return f'git@github.com:{full_name}.git'
 
 
