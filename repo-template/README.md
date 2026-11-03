@@ -4,6 +4,12 @@ Your private resume workspace for any profession, industry, or field of study.
 
 ## Use CVPilot from Discord
 
+Join the CVPilot server and receive the CVPilot User role from an administrator.
+You can then use the commands in the designated server channel or in a direct
+message to the CVPilot bot. DM commands check your current server membership and
+role each time; leaving the server or losing access disables DM use. Group DMs
+are not supported. Operator diagnostics stay restricted to the server.
+
 1. Initialize with `/cvpilot init github_username:<your GitHub username>`.
 2. Upload with `/cvpilot master upload file:<PDF or TeX>`. The label defaults to
    `general`. Use any label you prefer, such as teaching, healthcare, sales,

@@ -19,3 +19,9 @@ create a clean appropriate TeX layout, and do not promise exact PDF formatting.
 The controller delivers generated PDF/TeX attachments privately in Discord;
 users can retrieve them with `/cvpilot download job_id:<id>`. Never request
 credentials or send private resumes to a public channel.
+
+Authorized users may run the same `/cvpilot` commands in the designated server
+channel or in a direct message to the bot after receiving server access. The
+native Discord listener checks current server membership and permissions for
+DM commands. Do not suggest that a DM bypasses permissions, and never offer
+operator diagnostics outside the configured server admin channel.

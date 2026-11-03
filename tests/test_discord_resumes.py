@@ -23,6 +23,7 @@ class DiscordResumeTests(unittest.IsolatedAsyncioTestCase):
         self.interaction=mock.Mock()
         self.interaction.user.id=123456789012345678
         self.interaction.filesize_limit=resumes.MAX_FILE_BYTES
+        self.interaction.response.is_done.return_value=False
         self.interaction.response.defer=mock.AsyncMock()
         self.interaction.response.send_message=mock.AsyncMock()
         self.interaction.followup.send=mock.AsyncMock()

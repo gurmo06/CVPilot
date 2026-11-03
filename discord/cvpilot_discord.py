@@ -49,22 +49,55 @@ async def request_controller(uid: int, action: str, args: dict) -> dict:
         writer.close()
         await writer.wait_closed()
 
+async def defer_private(interaction: discord.Interaction) -> None:
+    if not interaction.response.is_done():
+        await interaction.response.defer(ephemeral=True,thinking=True)
+
+
+async def private_reply(interaction: discord.Interaction, text: str) -> None:
+    kwargs={'ephemeral':True,'allowed_mentions':discord.AllowedMentions.none()}
+    if interaction.response.is_done():
+        await interaction.followup.send(text,**kwargs)
+    else:
+        await interaction.response.send_message(text,**kwargs)
+
+
 async def public_authorized(interaction: discord.Interaction) -> bool:
-    # The command is restricted to the dedicated guild, public command channel
-    # and explicitly provisioned member role. Owner can operate without the role.
-    if not GUILD_ID.isdigit() or not PUBLIC_CHANNEL_ID.isdigit() or not USER_ROLE_ID.isdigit():
-        await interaction.response.send_message('GUILD_ID, PUBLIC_CHANNEL_ID, or USER_ROLE_ID is not configured correctly.', ephemeral=True)
+    # Membership and role grants originate in the dedicated server. DM checks
+    # fetch current membership rather than trusting a permanent approval/cache.
+    if not all(value.isdigit() for value in (GUILD_ID,PUBLIC_CHANNEL_ID,USER_ROLE_ID)):
+        await private_reply(interaction,'CVPilot server access is not configured correctly. Contact the operator.')
         return False
-    if OWNER_ID.isdigit() and interaction.user.id == int(OWNER_ID):
-        return True
-    if interaction.guild_id != int(GUILD_ID) or interaction.channel_id != int(PUBLIC_CHANNEL_ID):
-        await interaction.response.send_message('Use CVPilot in the designated #cvpilot channel.', ephemeral=True)
-        return False
-    user_roles = getattr(interaction.user, 'roles', [])
-    if int(USER_ROLE_ID) not in [getattr(role, 'id', None) for role in user_roles]:
-        await interaction.response.send_message('Access requires the CVPilot User role.', ephemeral=True)
+    owner=OWNER_ID.isdigit() and interaction.user.id==int(OWNER_ID)
+    if interaction.guild_id is not None:
+        if interaction.guild_id!=int(GUILD_ID) or interaction.channel_id!=int(PUBLIC_CHANNEL_ID):
+            await private_reply(interaction,'Use the designated #cvpilot server channel or a direct message to CVPilot.')
+            return False
+        member=interaction.user
+    else:
+        if getattr(interaction.channel,'type',None)!=discord.ChannelType.private:
+            await private_reply(interaction,'Use a direct message to CVPilot or the designated server channel.')
+            return False
+        # A REST role check can take longer than Discord's initial-response limit.
+        await defer_private(interaction)
+        async def fetch_member():
+            guild=interaction.client.get_guild(int(GUILD_ID))
+            if guild is None:guild=await interaction.client.fetch_guild(int(GUILD_ID))
+            return await guild.fetch_member(interaction.user.id)
+        try:
+            member=await asyncio.wait_for(fetch_member(),timeout=10)
+        except discord.NotFound:
+            await private_reply(interaction,'Join the CVPilot server and get the CVPilot User role before using commands in DMs.')
+            return False
+        except (discord.HTTPException,OSError,TimeoutError) as exc:
+            print(f'[cvpilot] DM authorization failed: {type(exc).__name__}: {exc}',flush=True)
+            await private_reply(interaction,'Unable to verify your CVPilot server access right now. Try again shortly or use the server channel.')
+            return False
+    if not owner and int(USER_ROLE_ID) not in [getattr(role,'id',None) for role in getattr(member,'roles',[])]:
+        await private_reply(interaction,'Access requires the CVPilot User role in the CVPilot server. Ask a server administrator for access.')
         return False
     return True
+
 
 async def send_controller_response(interaction: discord.Interaction, result: dict) -> None:
     text=str(result.get('text','No response from CVPilot controller'))[:1900]
@@ -95,7 +128,7 @@ async def invoke(interaction: discord.Interaction, action: str, **args) -> None:
     # Discord provides interaction.user.id; never read a caller ID from user text.
     if not await public_authorized(interaction):
         return
-    await interaction.response.defer(ephemeral=True, thinking=True)
+    await defer_private(interaction)
     try:
         response = await request_controller(interaction.user.id, action, args)
         await send_controller_response(interaction,response)
@@ -105,8 +138,13 @@ async def invoke(interaction: discord.Interaction, action: str, **args) -> None:
                                         ephemeral=True,allowed_mentions=discord.AllowedMentions.none())
 
 # These are genuine typed Discord slash subcommands, not a generic 'input' box.
-cvpilot = app_commands.Group(name='cvpilot', description='Manage your private CVPilot resumes')
-# Guild-only commands are registered to the dedicated CVPilot server below.
+cvpilot = app_commands.Group(
+    name='cvpilot',description='Manage your private CVPilot resumes',
+    allowed_contexts=app_commands.AppCommandContext(guild=True,dm_channel=True,private_channel=False),
+    allowed_installs=app_commands.AppInstallationType(guild=True,user=False),
+)
+# Register both globally (for bot DMs) and in the dedicated server. Runtime
+# checks still require membership and the server-issued role for every command.
 
 @cvpilot.command(name='help', description='Show CVPilot commands and usage examples')
 async def help_command(interaction: discord.Interaction):
@@ -114,6 +152,7 @@ async def help_command(interaction: discord.Interaction):
         return
     help_text = (
         '**CVPilot — Quick Help**\n'
+        'Use commands in #cvpilot or DM CVPilot after receiving the CVPilot User role. Server membership and permissions are checked in DMs.\n\n'
         '**Getting started**\n'
         '`/cvpilot init github_username:<your GitHub username>` — Create your private repo.\n'
         '`/cvpilot repo` — View the repository link.\n'
@@ -137,7 +176,7 @@ async def help_command(interaction: discord.Interaction):
         'New uploads are available after their job completes. GitHub keeps review history; no manual merge is needed to start tailoring. '
         'If DMs are blocked, use /cvpilot download. DOCX uploads are not supported.'
     )
-    await interaction.response.send_message(help_text, ephemeral=True)
+    await private_reply(interaction,help_text)
 
 @cvpilot.command(name='init', description='Initialize a private GitHub repository and workspace')
 @app_commands.describe(github_username='Your GitHub username (for the private repository invitation)')
@@ -180,7 +219,7 @@ async def master_edit(interaction: discord.Interaction, instructions: str, label
 async def master_upload(interaction: discord.Interaction, file: discord.Attachment,
                         label: str = 'general', companion: discord.Attachment | None = None):
     if not await public_authorized(interaction):return
-    await interaction.response.defer(ephemeral=True,thinking=True)
+    await defer_private(interaction)
     try:
         validate_label(label)
         attachments=[file]+([companion] if companion is not None else [])
@@ -309,10 +348,11 @@ class CVPilotClient(discord.Client):
         if GUILD_ID != ADMIN_GUILD_ID:
             raise RuntimeError('Admin guild must equal the dedicated CVPilot guild')
         guild = discord.Object(id=int(GUILD_ID))
+        self.tree.add_command(cvpilot)
         self.tree.add_command(cvpilot, guild=guild)
         self.tree.add_command(openclaw_admin, guild=guild)
-        # Removes stale GLOBAL commands from this dedicated Discord application,
-        # including the old DM-only /cvpilot command. Does not affect other bots.
+        # Global CVPilot commands enable bot DMs. Admin diagnostics are only
+        # included in the dedicated guild sync and remain server/channel scoped.
         globals_synced = await self.tree.sync()
         print('[cvpilot] Global command list now: ' +
               (', '.join(c.name for c in globals_synced) or '(empty)'), flush=True)
@@ -335,7 +375,7 @@ if __name__ == '__main__':
         missing = expected - names
         if missing:
             raise SystemExit('Missing native subcommands: ' + ', '.join(sorted(missing)))
-        print('OK: 13 guild CVPilot subcommands and 4 owner-only admin diagnostics defined')
+        print('OK: 13 server/DM CVPilot subcommands and 4 server-only admin diagnostics defined')
         sys.exit(0)
     if not TOKEN or TOKEN == 'REPLACE_WITH_TOKEN':
         raise SystemExit('Set CVPILOT_DISCORD_TOKEN in ~/.config/cvpilot/controller.env')

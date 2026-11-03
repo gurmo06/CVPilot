@@ -101,6 +101,7 @@ class BrandingTests(unittest.TestCase):
         listener = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(listener)
         interaction = mock.Mock()
+        interaction.response.is_done.return_value=False
         interaction.response.send_message = mock.AsyncMock()
         with mock.patch.object(listener, 'public_authorized', new=mock.AsyncMock(return_value=True)):
             asyncio.run(listener.help_command.callback(interaction))
