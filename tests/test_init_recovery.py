@@ -135,8 +135,81 @@ class InitRecoveryTests(unittest.TestCase):
         result=worker.repo_init(self.job(),self.store)
         self.assertEqual(self.gh.created,1)
         self.assertEqual(self.gh.invited,1)
-        self.assertEqual(result['url'],f'https://github.com/CV-Pilot/career-{UID}')
+        self.assertEqual(result['url'],f'https://github.com/CV-Pilot/cvpilot-{UID}')
         self.assertFalse((self.state/'intents'/f'{UID}.json').exists())
+
+    def test_success_message_has_no_gateway_or_protection_warning(self):
+        result=worker.repo_init(self.job(),self.store)
+        self.assertEqual(result['note'],
+            'Private CVPilot workspace is ready for sampleuser. Accept the GitHub invitation if prompted.')
+        self.assertNotIn('gateway',result['note'].lower())
+        self.assertNotIn('protection',result['note'].lower())
+        self.assertEqual(result['main_protection'],'enabled')
+        self.assertIsNone(result['main_protection_error'])
+
+    def test_plan_limitation_is_logged_and_saved_without_warning_in_success_message(self):
+        error=github.GitHubAPIError(403,'PUT','/branches/main/protection',
+                                  'Upgrade to GitHub Pro or make this repository public to enable this feature.')
+        with (mock.patch.object(self.gh,'protect_main',side_effect=error),
+              mock.patch('builtins.print') as log):
+            result=worker.repo_init(self.job(),self.store)
+        self.assertEqual(result['main_protection'],'unavailable_on_plan')
+        self.assertEqual(result['main_protection_error'],str(error))
+        self.assertTrue(any(str(error) in str(call) for call in log.call_args_list))
+        self.assertNotIn('Upgrade',result['note'])
+        self.assertNotIn('protection',result['note'])
+        self.assertNotIn('gateway',result['note'].lower())
+        self.assertEqual(self.gh.invited,1)
+        self.assertTrue(self.gh.repo['private'])
+
+    def test_other_protection_errors_keep_operator_diagnostics(self):
+        error=github.GitHubAPIError(403,'PUT','/branches/main/protection','Resource not accessible by token')
+        with (mock.patch.object(self.gh,'protect_main',side_effect=error),
+              mock.patch('builtins.print') as log):
+            result=worker.repo_init(self.job(),self.store)
+        self.assertEqual(result['main_protection'],'failed')
+        self.assertEqual(result['main_protection_error'],str(error))
+        self.assertTrue(any(str(error) in str(call) for call in log.call_args_list))
+        self.assertNotIn('Resource not accessible',result['note'])
+
+    def test_invitation_failure_is_still_a_real_initialization_failure(self):
+        error=github.GitHubAPIError(403,'PUT','/collaborators/sampleuser','Forbidden')
+        with mock.patch.object(self.gh,'invite',side_effect=error):
+            with self.assertRaises(github.GitHubAPIError):
+                worker.repo_init(self.job(),self.store)
+        self.assertTrue((self.state/'intents'/f'{UID}.json').exists())
+
+    def test_new_prefix_is_used_for_all_provisioning_operations(self):
+        with (mock.patch.object(self.gh, 'get_repo', wraps=self.gh.get_repo) as lookup,
+              mock.patch.object(self.gh, 'deploy_key', wraps=self.gh.deploy_key) as deploy,
+              mock.patch.object(self.gh, 'invite', wraps=self.gh.invite) as invite,
+              mock.patch.object(self.gh, 'protect_main', wraps=self.gh.protect_main) as protect):
+            worker.repo_init(self.job(),self.store)
+        name=f'cvpilot-{UID}'
+        lookup.assert_called_with(name)
+        self.assertEqual(deploy.call_args.args[0],name)
+        invite.assert_called_with(name,'sampleuser')
+        protect.assert_called_with(name)
+        clones=[args for args in self.fake_git_calls if args[:2]==['git','clone']]
+        self.assertEqual(clones[0][2],f'git@github.com:CV-Pilot/{name}.git')
+
+    def test_new_prefix_marked_intent_recovers(self):
+        name=f'cvpilot-{UID}'
+        self.intent({'name':name,'github_user':'sampleuser','org':'CV-Pilot',
+                     'marker':'init-test','repo_id':33})
+        self.gh.repo={'id':33,'name':name,'private':True,
+                      'owner':{'login':'CV-Pilot'},
+                      'description':'CVPilot managed workspace [init-test]'}
+        result=worker.repo_init(self.job(),self.store)
+        self.assertEqual(self.gh.created,0)
+        self.assertTrue(result['url'].endswith(name))
+
+    def test_intent_for_another_user_or_repository_is_rejected(self):
+        for name in ('unrelated', 'career-223456789012345678', 'cvpilot-223456789012345678'):
+            self.intent({'name':name,'github_user':'sampleuser','marker':'init-test'})
+            with self.subTest(name=name), self.assertRaisesRegex(RuntimeError,'different parameters'):
+                worker.repo_init(self.job(),self.store)
+        self.assertEqual(self.gh.created,0)
 
     def test_legacy_intent_and_missing_repo_recovers(self):
         self.intent({'name':f'career-{UID}','github_user':'sampleuser'})
@@ -240,7 +313,7 @@ class InitRecoveryTests(unittest.TestCase):
     def test_existing_key_already_in_use_rotates_and_preserves_old(self):
         self.gh.used_keys.add(('ssh-ed25519', 'AAAATEST'))
         result=worker.repo_init(self.job(),self.store)
-        self.assertIn('career-',result['url'])
+        self.assertIn('cvpilot-',result['url'])
         self.assertEqual(len(self.gh.keys),1)
         self.assertEqual(self.gh.keys[0]['key'].split()[1], 'AAAANEWKEY')
         active=worker.keypath(UID)

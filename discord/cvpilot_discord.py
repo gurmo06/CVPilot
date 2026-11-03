@@ -70,7 +70,7 @@ async def invoke(interaction: discord.Interaction, action: str, **args) -> None:
     await interaction.followup.send(response, ephemeral=True)
 
 # These are genuine typed Discord slash subcommands, not a generic 'input' box.
-cvpilot = app_commands.Group(name='cvpilot', description='Manage your private CVPilot career resumes')
+cvpilot = app_commands.Group(name='cvpilot', description='Manage your private CVPilot resumes')
 # Guild-only commands are registered to the dedicated CVPilot server below.
 
 @cvpilot.command(name='help', description='Show CVPilot commands and usage examples')
@@ -109,7 +109,7 @@ async def init(interaction: discord.Interaction, github_username: str):
 async def repo(interaction: discord.Interaction):
     await invoke(interaction, 'repo')
 
-@cvpilot.command(name='status', description='View your career resume job queue and results')
+@cvpilot.command(name='status', description='View your CVPilot job queue and results')
 async def status(interaction: discord.Interaction):
     await invoke(interaction, 'status')
 
