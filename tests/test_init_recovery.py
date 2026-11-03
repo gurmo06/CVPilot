@@ -138,6 +138,47 @@ class InitRecoveryTests(unittest.TestCase):
         self.assertEqual(result['url'],f'https://github.com/CV-Pilot/cvpilot-{UID}')
         self.assertFalse((self.state/'intents'/f'{UID}.json').exists())
 
+    def test_success_message_has_no_gateway_or_protection_warning(self):
+        result=worker.repo_init(self.job(),self.store)
+        self.assertEqual(result['note'],
+            'Private CVPilot workspace is ready for sampleuser. Accept the GitHub invitation if prompted.')
+        self.assertNotIn('gateway',result['note'].lower())
+        self.assertNotIn('protection',result['note'].lower())
+        self.assertEqual(result['main_protection'],'enabled')
+        self.assertIsNone(result['main_protection_error'])
+
+    def test_plan_limitation_is_logged_and_saved_without_warning_in_success_message(self):
+        error=github.GitHubAPIError(403,'PUT','/branches/main/protection',
+                                  'Upgrade to GitHub Pro or make this repository public to enable this feature.')
+        with (mock.patch.object(self.gh,'protect_main',side_effect=error),
+              mock.patch('builtins.print') as log):
+            result=worker.repo_init(self.job(),self.store)
+        self.assertEqual(result['main_protection'],'unavailable_on_plan')
+        self.assertEqual(result['main_protection_error'],str(error))
+        self.assertTrue(any(str(error) in str(call) for call in log.call_args_list))
+        self.assertNotIn('Upgrade',result['note'])
+        self.assertNotIn('protection',result['note'])
+        self.assertNotIn('gateway',result['note'].lower())
+        self.assertEqual(self.gh.invited,1)
+        self.assertTrue(self.gh.repo['private'])
+
+    def test_other_protection_errors_keep_operator_diagnostics(self):
+        error=github.GitHubAPIError(403,'PUT','/branches/main/protection','Resource not accessible by token')
+        with (mock.patch.object(self.gh,'protect_main',side_effect=error),
+              mock.patch('builtins.print') as log):
+            result=worker.repo_init(self.job(),self.store)
+        self.assertEqual(result['main_protection'],'failed')
+        self.assertEqual(result['main_protection_error'],str(error))
+        self.assertTrue(any(str(error) in str(call) for call in log.call_args_list))
+        self.assertNotIn('Resource not accessible',result['note'])
+
+    def test_invitation_failure_is_still_a_real_initialization_failure(self):
+        error=github.GitHubAPIError(403,'PUT','/collaborators/sampleuser','Forbidden')
+        with mock.patch.object(self.gh,'invite',side_effect=error):
+            with self.assertRaises(github.GitHubAPIError):
+                worker.repo_init(self.job(),self.store)
+        self.assertTrue((self.state/'intents'/f'{UID}.json').exists())
+
     def test_new_prefix_is_used_for_all_provisioning_operations(self):
         with (mock.patch.object(self.gh, 'get_repo', wraps=self.gh.get_repo) as lookup,
               mock.patch.object(self.gh, 'deploy_key', wraps=self.gh.deploy_key) as deploy,

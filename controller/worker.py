@@ -447,18 +447,18 @@ def repo_init(job,store):
         run_git(uid,repo,'commit','-m','Initialize CVPilot workspace')
         run_git(uid,repo,'push','origin','main')
     protection='enabled'
-
+    protection_error=None
     try:
         gh.protect_main(name)
-
     except GitHubAPIError as e:
         if e.status == 403 and 'Upgrade to GitHub Pro' in str(e):
-            protection = (
-                'unavailable on current GitHub plan; '
-                'main is not protected'
-            )
+            protection='unavailable_on_plan'
         else:
-            protection = f'not enabled: {e}'
+            protection='failed'
+        # Branch protection is optional. Keep its actual outcome visible to
+        # operators without putting GitHub configuration details in a success DM.
+        protection_error=str(e)
+        print(f'CVPilot init {org}/{name}: main protection {protection}: {e}',flush=True)
 
     gh.invite(name,github_user)
     # Separate OpenClaw agent and private sandbox, without Git admin creds.
@@ -468,7 +468,8 @@ def repo_init(job,store):
             (uid,github_user,f'{org}/{name}',f'career-{uid}'))
     intent.unlink(missing_ok=True)
     return {'url':f'https://github.com/{org}/{name}',
-            'note':f'Private repo created; GitHub invitation issued to {github_user} (accept it to view files). main protection: {protection}. Agent may need a gateway restart to activate new DM route.'}
+            'note':f'Private CVPilot workspace is ready for {github_user}. Accept the GitHub invitation if prompted.',
+            'main_protection':protection,'main_protection_error':protection_error}
 
 def provision_agent(uid,home):
     agent='career-'+uid

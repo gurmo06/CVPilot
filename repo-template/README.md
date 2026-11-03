@@ -2,8 +2,7 @@
 
 One **private GitHub repository per Discord user**.
 
-`main` is manually maintained; branch protection depends on the GitHub plan. The bot reads `main` and pushes
-only `cvpilot/<job-kind>/<job-id>` branches, which are reviewed as PRs before merging.
+`main` is manually maintained; branch protection depends on the GitHub plan. The bot reads `main` and pushes only `cvpilot/<job-kind>/<job-id>` branches, which are reviewed as PRs before merging.
 
 - `master-resumes/{swe,ml,systems,it,web}/resume.tex` and compiled resume.pdf
 - `profile/MASTER_PROFILE.md` and `profile/profile_sources.json`
