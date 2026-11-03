@@ -47,7 +47,6 @@ class BrandingTests(unittest.TestCase):
             for action, args, suffix in (
                 ('repo', {}, ''),
                 ('init', {'github_username': 'sampleuser'}, ''),
-                ('master', {'operation': 'get', 'role': 'swe'}, '/tree/main/master-resumes/swe'),
                 ('profile', {'operation': 'show'}, '/blob/main/profile/MASTER_PROFILE.md')):
                 with self.subTest(name=name, action=action):
                     result = process({'sender_id': UID, 'action': action, 'args': args}, self.store)
@@ -113,7 +112,7 @@ class BrandingTests(unittest.TestCase):
             self.assertTrue(any(command == name or command.startswith(name + ' ') for name in names), command)
         self.assertNotIn('/career', text)
         self.assertEqual(len([cmd for cmd in listener.cvpilot.walk_commands()
-                              if not hasattr(cmd, 'commands')]), 12)
+                              if not hasattr(cmd, 'commands')]), 13)
 
 
 if __name__ == '__main__':

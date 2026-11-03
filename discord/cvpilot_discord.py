@@ -2,10 +2,14 @@
 """
 Native CVPilot Discord slash-command tree. Sends authenticated user IDs to the
 existing CVPilot v2 Unix-socket controller. Uses no LLM, GitHub credentials,
-filesystem mounts, or Discord message-content privileges.
+shared resume filesystem, or Discord message-content privileges. Attachments are
+transferred through the authenticated local controller socket.
 Use 'python3 -m py_compile   ~/.local/share/cvpilot/app/controller/main.py' for recompilation
 """
 import asyncio
+import base64
+import io
+import sys
 import json
 import os
 import shutil
@@ -14,6 +18,9 @@ from typing import Literal
 
 import discord
 from discord import app_commands
+
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'app/controller'))
+from resumes import MAX_FILE_BYTES, MAX_PACKET_BYTES, validate_files, label as validate_label
 
 SOCKET = os.environ.get('CVPILOT_SOCKET', str(Path.home() / '.local/state/cvpilot/controller.sock'))
 TOKEN = os.environ.get('CVPILOT_DISCORD_TOKEN', '')
@@ -25,17 +32,19 @@ CLEAR_GUILD = os.environ.get('CVPILOT_CLEAR_GUILD_COMMANDS', '0') == '1'
 OWNER_ID = os.environ.get('CVPILOT_OWNER_DISCORD_ID', '').strip()
 ADMIN_GUILD_ID = os.environ.get('CVPILOT_ADMIN_GUILD_ID', GUILD_ID).strip()
 
-async def request_controller(uid: int, action: str, args: dict) -> str:
-    reader, writer = await asyncio.wait_for(asyncio.open_unix_connection(SOCKET), timeout=3)
+async def request_controller(uid: int, action: str, args: dict) -> dict:
+    reader, writer = await asyncio.wait_for(asyncio.open_unix_connection(SOCKET,limit=MAX_PACKET_BYTES+1), timeout=3)
     try:
         packet = json.dumps({'sender_id': str(uid), 'action': action, 'args': args}) + '\n'
-        writer.write(packet.encode('utf8'))
-        await asyncio.wait_for(writer.drain(), timeout=3)
-        raw = await asyncio.wait_for(reader.readline(), timeout=10)
-        if not raw or len(raw) > 65536:
+        encoded=packet.encode('utf8')
+        if len(encoded)>MAX_PACKET_BYTES:raise ValueError('Resume transfer is too large')
+        writer.write(encoded)
+        await asyncio.wait_for(writer.drain(), timeout=60)
+        raw = await asyncio.wait_for(reader.readline(), timeout=75)
+        if not raw or len(raw) > MAX_PACKET_BYTES:
             raise RuntimeError('Invalid or empty controller response')
         result = json.loads(raw)
-        return str(result.get('text', 'No response from CVPilot controller'))[:1900]
+        return result
     finally:
         writer.close()
         await writer.wait_closed()
@@ -57,6 +66,31 @@ async def public_authorized(interaction: discord.Interaction) -> bool:
         return False
     return True
 
+async def send_controller_response(interaction: discord.Interaction, result: dict) -> None:
+    text=str(result.get('text','No response from CVPilot controller'))[:1900]
+    files=[]
+    attachments=result.get('attachments',[]) if result.get('ok',True) else []
+    if not isinstance(attachments,list) or len(attachments)>2:
+        raise ValueError('Invalid resume download response')
+    if attachments:
+        decoded=validate_files(attachments)
+        limit=getattr(interaction,'filesize_limit',MAX_FILE_BYTES)
+        if not isinstance(limit,int):limit=MAX_FILE_BYTES
+        if any(len(data)>min(limit,MAX_FILE_BYTES) for data in decoded.values()):
+            text+='\nDiscord cannot attach a file of this size here. Use the private GitHub link.'
+        else:
+            files=[discord.File(io.BytesIO(data),filename=name) for name,data in decoded.items()]
+    try:
+        await interaction.followup.send(text,ephemeral=True,files=files,
+                                         allowed_mentions=discord.AllowedMentions.none())
+    except discord.HTTPException:
+        if not files:raise
+        await interaction.followup.send(text+'\nDiscord could not attach the files. Try /cvpilot download or use the private GitHub link.',
+                                         ephemeral=True,allowed_mentions=discord.AllowedMentions.none())
+    finally:
+        for file in files:file.close()
+
+
 async def invoke(interaction: discord.Interaction, action: str, **args) -> None:
     # Discord provides interaction.user.id; never read a caller ID from user text.
     if not await public_authorized(interaction):
@@ -64,10 +98,11 @@ async def invoke(interaction: discord.Interaction, action: str, **args) -> None:
     await interaction.response.defer(ephemeral=True, thinking=True)
     try:
         response = await request_controller(interaction.user.id, action, args)
-    except (OSError, TimeoutError, RuntimeError, ValueError) as exc:
-        response = 'CVPilot controller unavailable or request failed. Check /cvpilot status or contact the operator.'
+        await send_controller_response(interaction,response)
+    except (OSError, TimeoutError, RuntimeError, ValueError, discord.HTTPException) as exc:
         print(f'[cvpilot] command error: {type(exc).__name__}: {exc}', flush=True)
-    await interaction.followup.send(response, ephemeral=True)
+        await interaction.followup.send('CVPilot request failed. Check /cvpilot status or contact the operator.',
+                                        ephemeral=True,allowed_mentions=discord.AllowedMentions.none())
 
 # These are genuine typed Discord slash subcommands, not a generic 'input' box.
 cvpilot = app_commands.Group(name='cvpilot', description='Manage your private CVPilot resumes')
@@ -84,11 +119,13 @@ async def help_command(interaction: discord.Interaction):
         '`/cvpilot repo` — View the repository link.\n'
         '`/cvpilot status` — Check queued work and results.\n\n'
         '**Applications**\n'
-        '`/cvpilot tailor url:<job posting URL>` — Generate a job-specific TeX and PDF.\n\n'
+        '`/cvpilot tailor url:<job posting URL>` — Get a tailored one-page PDF and TeX by private DM.\n'
+        '`/cvpilot download job_id:<id>` — Download completed resume files here privately; omit the ID for the latest.\n\n'
         '**Master resumes**\n'
-        '`/cvpilot master get role:<swe|ml|systems|it|web>` — Locate a master.\n'
-        '`/cvpilot master upload role:<role>` — Get GitHub upload instructions.\n'
-        '`/cvpilot master edit role:<role> instructions:<change>` — Propose edits.\n\n'
+        '`/cvpilot master get label:<label>` — Download your saved source resume here privately.\n'
+        '`/cvpilot master upload file:<PDF or TeX> label:<label> companion:<optional matching file>` — Upload a source resume.\n'
+        '`/cvpilot master edit label:<label> instructions:<change>` — Propose edits.\n'
+        'Labels default to `general`. Choose any label: teaching, healthcare, sales, arts, or your own. Reusing a label explicitly replaces its active uploaded version.\n\n'
         '**Master profile**\n'
         '`/cvpilot profile show` — View your profile.\n'
         '`/cvpilot profile sync` — Sync verified facts from masters.\n'
@@ -96,7 +133,9 @@ async def help_command(interaction: discord.Interaction):
         '**Permissions**\n'
         '`/cvpilot settings master_edit value:<on|off|show>` — Manage master edit permission.\n\n'
         'Master edits must be requested explicitly. CVPilot does not silently merge into main. '
-        'Current binary resume uploads are performed through GitHub.'
+        'PDF and UTF-8 TeX attachments are supported, up to 8 MiB each. Use companion to upload a matching PDF/TeX pair together. '
+        'New uploads are available after their job completes. GitHub keeps review history; no manual merge is needed to start tailoring. '
+        'If DMs are blocked, use /cvpilot download. DOCX uploads are not supported.'
     )
     await interaction.response.send_message(help_text, ephemeral=True)
 
@@ -118,23 +157,48 @@ async def status(interaction: discord.Interaction):
 async def tailor(interaction: discord.Interaction, url: str):
     await invoke(interaction, 'tailor', url=url)
 
-master = app_commands.Group(name='master', description='Get or revise a master resume', parent=cvpilot)
+@cvpilot.command(name='download', description='Download your completed resume files privately as attachments')
+@app_commands.describe(job_id='Your completed job ID; omit to download your latest resume')
+async def download(interaction: discord.Interaction, job_id: int | None = None):
+    await invoke(interaction,'download',job_id=job_id)
 
-@master.command(name='get', description='Get the GitHub location of your master resume')
-@app_commands.describe(role='Resume category (swe, ml, systems, it, web, etc.)')
-async def master_get(interaction: discord.Interaction, role: str):
-    await invoke(interaction, 'master', operation='get', role=role)
+master = app_commands.Group(name='master', description='Upload, download, or revise source resumes for any field', parent=cvpilot)
 
-@master.command(name='edit', description='Request a master edit on a new review branch')
-@app_commands.describe(role='Resume category', instructions='Specific requested changes (must be factual)')
-async def master_edit(interaction: discord.Interaction, role: str, instructions: str):
-    await invoke(interaction, 'master', operation='edit', role=role, instructions=instructions)
+@master.command(name='get', description='Download your saved source resume as private attachments')
+@app_commands.describe(label='Any resume label, such as general, teaching, healthcare, or sales')
+async def master_get(interaction: discord.Interaction, label: str = 'general'):
+    await invoke(interaction, 'master', operation='get', role=label)
 
-@master.command(name='upload', description='Show how to upload or replace a master resume using GitHub')
-@app_commands.describe(role='Resume category')
-async def master_upload(interaction: discord.Interaction, role: str):
-    # Controller v2 does not yet ingest Discord binary attachments.
-    await invoke(interaction, 'master', operation='upload', role=role)
+@master.command(name='edit', description='Request a source-resume edit on a new review branch')
+@app_commands.describe(label='Your resume label; default general', instructions='Specific requested changes (must be factual)')
+async def master_edit(interaction: discord.Interaction, instructions: str, label: str = 'general'):
+    await invoke(interaction, 'master', operation='edit', role=label, instructions=instructions)
+
+@master.command(name='upload', description='Upload a PDF or TeX source resume for any profession')
+@app_commands.describe(file='PDF or UTF-8 TeX resume, up to 8 MiB', label='Any lowercase resume label; default general',
+                       companion='Optional matching PDF or TeX file, up to 8 MiB')
+async def master_upload(interaction: discord.Interaction, file: discord.Attachment,
+                        label: str = 'general', companion: discord.Attachment | None = None):
+    if not await public_authorized(interaction):return
+    await interaction.response.defer(ephemeral=True,thinking=True)
+    try:
+        validate_label(label)
+        attachments=[file]+([companion] if companion is not None else [])
+        for attachment in attachments:
+            if not 0 < attachment.size <= MAX_FILE_BYTES:
+                raise ValueError('Each resume attachment must be nonempty and at most 8 MiB.')
+            if Path(attachment.filename).suffix.lower() not in ('.pdf','.tex'):
+                raise ValueError('Resume attachments must be PDF or TeX files.')
+        contents=await asyncio.gather(*(asyncio.wait_for(item.read(),timeout=60) for item in attachments))
+        files=[{'filename':item.filename,'content_base64':base64.b64encode(data).decode('ascii')}
+               for item,data in zip(attachments,contents)]
+        validate_files(files)
+        response=await request_controller(interaction.user.id,'master',
+                                           {'operation':'upload','role':label,'files':files})
+    except (OSError,TimeoutError,RuntimeError,ValueError,discord.HTTPException) as exc:
+        print(f'[cvpilot] upload error: {type(exc).__name__}: {exc}',flush=True)
+        response={'text':str(exc) if isinstance(exc,ValueError) else 'Resume upload failed. Please try again or contact the operator.'}
+    await send_controller_response(interaction,response)
 
 profile = app_commands.Group(name='profile', description='View, sync, or edit your master profile', parent=cvpilot)
 
@@ -264,14 +328,14 @@ if __name__ == '__main__':
     import sys
     if '--check' in sys.argv:
         names = {cmd.qualified_name for cmd in cvpilot.walk_commands()}
-        expected = {'cvpilot help', 'cvpilot init', 'cvpilot repo', 'cvpilot status', 'cvpilot tailor',
+        expected = {'cvpilot help', 'cvpilot init', 'cvpilot repo', 'cvpilot status', 'cvpilot tailor', 'cvpilot download',
                     'cvpilot master get', 'cvpilot master edit', 'cvpilot master upload',
                     'cvpilot profile show', 'cvpilot profile sync', 'cvpilot profile edit',
                     'cvpilot settings master_edit'}
         missing = expected - names
         if missing:
             raise SystemExit('Missing native subcommands: ' + ', '.join(sorted(missing)))
-        print('OK: 12 guild CVPilot subcommands and 4 owner-only admin diagnostics defined')
+        print('OK: 13 guild CVPilot subcommands and 4 owner-only admin diagnostics defined')
         sys.exit(0)
     if not TOKEN or TOKEN == 'REPLACE_WITH_TOKEN':
         raise SystemExit('Set CVPILOT_DISCORD_TOKEN in ~/.config/cvpilot/controller.env')

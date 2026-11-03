@@ -1,5 +1,5 @@
 import sqlite3
-from contextlib import contextmanager
+from contextlib import contextmanager, closing
 from pathlib import Path
 
 SCHEMA = '''
@@ -58,14 +58,30 @@ class Store:
         with self.tx() as c:
             c.execute("UPDATE jobs SET state='queued',started_at=NULL WHERE state='running'")
     def user(self, uid):
-        with self.connection() as c:
+        with closing(self.connection()) as c:
             x=c.execute('SELECT * FROM users WHERE discord_id=?',(uid,)).fetchone()
         return dict(x) if x else None
     def job(self, jid):
-        with self.connection() as c:
+        with closing(self.connection()) as c:
             x=c.execute('SELECT * FROM jobs WHERE id=?',(jid,)).fetchone()
         return dict(x) if x else None
     def recent(self, uid):
-        with self.connection() as c:
+        with closing(self.connection()) as c:
             xs=c.execute('SELECT id,kind,state,result,error,created_at FROM jobs WHERE discord_id=? ORDER BY id DESC LIMIT 8',(uid,)).fetchall()
         return [dict(x) for x in xs]
+
+    def latest_uploads(self, uid):
+        import json
+        with closing(self.connection()) as c:
+            rows=c.execute("SELECT result FROM jobs WHERE discord_id=? AND kind='master-upload' AND state='done' ORDER BY id DESC",(uid,)).fetchall()
+        uploads={}
+        for row in rows:
+            result=json.loads(row['result'] or '{}')
+            name=result.get('label')
+            if name and name not in uploads: uploads[name]=result
+        return uploads
+    def latest_download(self, uid):
+        import json
+        with closing(self.connection()) as c:
+            rows=c.execute("SELECT id,result FROM jobs WHERE discord_id=? AND state='done' ORDER BY id DESC",(uid,)).fetchall()
+        return next((row['id'] for row in rows if json.loads(row['result'] or '{}').get('artifacts')),None)

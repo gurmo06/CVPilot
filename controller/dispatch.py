@@ -1,11 +1,11 @@
 import json, os, re, socketserver, threading, time
 from pathlib import Path
 from store import Store
+from resumes import label, stage_upload, MAX_PACKET_BYTES
 
 UID_RE=re.compile(r'^[0-9]{16,22}$')
-ROLE_RE=re.compile(r'^[a-z][a-z0-9-]{0,24}$')
 USERNAME_RE=re.compile(r'^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$')
-ALLOWED={'init','repo','settings','status','tailor','master','profile','answer'}
+ALLOWED={'init','repo','settings','status','tailor','master','profile','answer','download'}
 
 def process(req, store):
     uid=str(req.get('sender_id',''))
@@ -39,6 +39,9 @@ def process(req, store):
         jid=store.enqueue(uid,'init',{'github_username':username})
         return {'text':f'Initialization queued as job #{jid}. `/cvpilot status` shows progress.'}
     if not user or not user.get('repo'): raise ValueError('Please initialize with /cvpilot init first')
+    if action=='download':
+        from worker import download_job
+        return download_job(uid,args.get('job_id'),store)
     if action=='tailor':
         import ipaddress,urllib.parse
         url=args.get('url','')
@@ -53,13 +56,13 @@ def process(req, store):
         except ValueError as e:
             if 'blocked' in str(e): raise
         jid=store.enqueue(uid,'tailor',{'url':url})
-        return {'text':f'Tailoring request queued as job #{jid}. Use `/cvpilot status` for updates.'}
+        return {'text':f'Tailoring request queued as job #{jid}. Your PDF and TeX will be sent by DM. Use `/cvpilot status` for updates or `/cvpilot download` if DMs are blocked.'}
     if action=='master':
         op=args.get('operation','')
-        role=args.get('role','')
-        if not ROLE_RE.fullmatch(role): raise ValueError('Supply a role such as swe, ml, systems, it, or web')
+        role=label(args.get('label',args.get('role','general')))
         if op=='get':
-            return {'text':f"https://github.com/{user['repo']}/tree/main/master-resumes/{role} (private; must have repository access)"}
+            from worker import download_master
+            return download_master(uid,role,store)
         if op in ('edit','update'):
             if not user['master_edit']: raise ValueError('Master editing is off. Enable with /cvpilot settings master_edit value:on')
             description=args.get('instructions','')
@@ -67,8 +70,17 @@ def process(req, store):
             jid=store.enqueue(uid,'master-edit',{'role':role,'instructions':description})
             return {'text':f'Master {role} edit queued as #{jid}. It will create a review branch, not change main.'}
         if op in ('upload','replace'):
-            return {'text':'Binary Discord attachment handling is not installed yet. Upload your .tex/.pdf to the private repo’s master-resumes/'+role+'/ on main, then use /cvpilot profile sync. The bot will use them on the next task.'}
-        raise ValueError('Usage: /cvpilot master get role:ROLE | edit role:ROLE instructions:TEXT | upload role:ROLE')
+            import shutil
+            from resumes import inbox_path
+            staged=stage_upload(store.path.parent,uid,args.get('files'))
+            try:
+                jid=store.enqueue(uid,'master-upload',{'role':role,**staged})
+            except BaseException:
+                shutil.rmtree(inbox_path(store.path.parent,uid,staged['upload_id']))
+                raise
+            return {'text':f'Resume upload queued as job #{jid} under label {role}. It will be available for tailoring after completion. Reusing a label explicitly replaces its active uploaded version; earlier versions stay in Git history.'}
+
+        raise ValueError('Usage: /cvpilot master get label:LABEL | edit label:LABEL instructions:TEXT | upload label:LABEL')
     if action=='profile':
         op=args.get('operation','')
         if op=='show': return {'text':f"https://github.com/{user['repo']}/blob/main/profile/MASTER_PROFILE.md"}
@@ -87,8 +99,10 @@ def process(req, store):
 
 class UnixHandler(socketserver.StreamRequestHandler):
     def handle(self):
-        data=self.rfile.readline(128*1024)
+        self.request.settimeout(60)
+        data=self.rfile.readline(MAX_PACKET_BYTES+1)
         try:
+            if len(data)>MAX_PACKET_BYTES or not data.endswith(b'\n'): raise ValueError('Request exceeds the attachment transfer limit')
             req=json.loads(data)
             result=process(req,self.server.store)
             ans={'ok':True,**result}

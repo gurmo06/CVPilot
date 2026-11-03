@@ -1,24 +1,31 @@
 # Master Career Profile
 
-This is a superset of verified career evidence sourced from master resumes and
-explicit user confirmations. Do not use unsupported claims.
+Verified evidence from your resumes and explicit confirmations, for any career
+or field of study. Keep source references and never add unsupported claims.
 
-## Education
-<!-- Confirmed details -->
+## Education and training
+<!-- Qualifications, courses, apprenticeships and relevant learning -->
 
-## Experience
-<!-- Include role, dates, verified duties, evidence and metrics -->
+## Work experience
+<!-- Positions, dates, responsibilities, achievements and substantiated results -->
 
-## Projects
-<!-- Include systems, approach, scale, technologies, verified metrics -->
+## Certifications and licenses
+<!-- Professional credentials and current status, where confirmed -->
 
-## Research
+## Projects and portfolio
+<!-- Work samples, creative work, practical projects and verified contributions -->
 
-## Skills and tools
-<!-- Confirmed languages, frameworks, OS, methods and tools -->
+## Volunteering and community involvement
+
+## Research, publications and presentations
+
+## Skills, methods and tools
+<!-- Industry knowledge, practical skills, methods, tools and languages -->
+
+## Awards and professional activities
 
 ## User-confirmed additions
-<!-- Confirmed directly by the user; not necessarily on any master resume -->
+<!-- Confirmed directly by the user; may not appear on every resume -->
 
 ## Needs review
-<!-- Changes removed from all resumes or conflicting facts -->
+<!-- Conflicting or incomplete facts that need confirmation -->

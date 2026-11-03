@@ -137,6 +137,8 @@ class InitRecoveryTests(unittest.TestCase):
         self.assertEqual(self.gh.invited,1)
         self.assertEqual(result['url'],f'https://github.com/CV-Pilot/cvpilot-{UID}')
         self.assertFalse((self.state/'intents'/f'{UID}.json').exists())
+        self.assertTrue((worker.repopath(UID)/'master-resumes/general').is_dir())
+        self.assertFalse((worker.repopath(UID)/'master-resumes/swe').exists())
 
     def test_success_message_has_no_gateway_or_protection_warning(self):
         result=worker.repo_init(self.job(),self.store)
