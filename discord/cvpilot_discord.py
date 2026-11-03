@@ -175,6 +175,7 @@ async def help_command(interaction: discord.Interaction):
         '`/cvpilot settings master_edit value:<on|off|show>` — Manage master edit permission.\n\n'
         'Master edits must be requested explicitly. CVPilot does not silently merge into main. '
         'PDF and UTF-8 TeX attachments are supported, up to 8 MiB each. Use companion to upload a matching PDF/TeX pair together. '
+        'A TeX-only upload automatically compiles to PDF; both files are available through master get or download. '
         'New uploads are available after their job completes. GitHub keeps review history; no manual merge is needed to start tailoring. '
         'If DMs are blocked, use /cvpilot download. DOCX uploads are not supported.'
     )

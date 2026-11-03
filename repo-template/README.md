@@ -15,6 +15,9 @@ are not supported. Operator diagnostics stay restricted to the server.
    `general`. Use any label you prefer, such as teaching, healthcare, sales,
    creative, academic, or volunteer. Add `companion:<matching file>` for a PDF/TeX
    pair. PDF and UTF-8 TeX files are supported, up to 8 MiB each; DOCX is not.
+   A TeX-only upload automatically compiles to PDF. Both files are saved and
+   available through `master get` or `download`. If you upload a matching pair,
+   CVPilot keeps your supplied PDF without recompiling it.
 3. Wait for the upload job to complete, then request
    `/cvpilot tailor url:<HTTPS job posting URL>`.
 4. Receive the one-page PDF and editable TeX as private Discord attachments.

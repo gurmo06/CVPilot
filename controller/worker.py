@@ -1,10 +1,11 @@
-import json, os, re, secrets, shutil, subprocess, time, hashlib
+import json, os, re, secrets, shutil, subprocess, time, hashlib, tempfile
 from pathlib import Path
 from urllib.parse import quote
 from store import Store
 from github import GitHub,GitHubAPIError,cmd,ssh_env
 from resumes import (label, inbox_path, staged_files, read_blob, artifact_files,
-                     active_upload_files, encode_attachments)
+                     active_upload_files, encode_attachments, validate_files,
+                     MAX_FILE_BYTES, MAX_PACKET_BYTES)
 
 ROOT=Path(os.environ.get('CVPILOT_STATE_DIR',str(Path.home()/'.local/state/cvpilot'))).resolve()
 KIT=Path(__file__).resolve().parent.parent
@@ -565,24 +566,94 @@ TASK: The user explicitly enabled and requested editing their master resume role
 TASK: Update ONLY profile/MASTER_PROFILE.md and profile/profile_sources.json. {specific}. Review ALL master resume .tex or PDF inputs. Add confirmed factual information found in any master and provenance references to source paths. Information absent from one master should be preserved if still in another or user-confirmed; removal from every master alone does not negate user-confirmed information. Never invent facts. Do not edit masters or commit/push.'''
     raise ValueError('Unsupported agent task')
 
-def compile_pdf(task, tex):
+def latex_engine(tex):
+    source=tex.read_text(encoding='utf-8')
+    directive=re.search(r'^\s*%\s*!\s*tex\s+(?:ts-)?program\s*=\s*(pdflatex|xelatex|lualatex)\s*$',source,re.I|re.M)
+    if directive:return directive.group(1).lower()
+    source=re.sub(r'(?<!\\)%[^\n]*','',source)
+    packages=re.findall(r'\\(?:usepackage|RequirePackage)\s*(?:\[[^\]]*\]\s*)?\{([^}]+)\}',source)
+    if (any(package.strip() in ('fontspec','unicode-math') for group in packages for package in group.split(','))
+            or re.search(r'\\(?:setmainfont|setsansfont|setmonofont|newfontfamily)\b',source)):
+        return 'xelatex'
+    return 'pdflatex'
+
+
+def latex_failure(tex):
+    """Prefer the first TeX error over latexmk's generic stderr footer."""
+    log=tex.with_suffix('.log')
+    if log.is_symlink() or not log.is_file():return ''
+    with log.open('r',encoding='utf-8',errors='replace') as stream:
+        lines=stream.read(2*1024*1024).splitlines()
+    for i,line in enumerate(lines):
+        if line.startswith('!'):
+            detail=[line.lstrip('! ').strip()]
+            for following in lines[i+1:i+8]:
+                if (not following.strip() or re.match(r'l\.\d+\b',following)
+                        or following.startswith(('Here is how much','For immediate help','See the '))):break
+                detail.append(following.strip())
+            location=next((entry for entry in lines[i+1:i+16] if re.match(r'l\.\d+\b',entry)),None)
+            if location:detail.append(re.match(r'l\.\d+',location).group())
+            return ' '.join(detail)[:650]
+    return ''
+
+
+def compile_pdf(task, tex, *, require_one_page=True):
     # Compile in a networkless container with limited privileges/resources.
     rel=tex.relative_to(task)
     folder=str(rel.parent)
     texname=rel.name
-    cmds=['docker','run','--rm','--network','none','--user',f'{os.getuid()}:{os.getgid()}',
+    container=['docker','run','--rm','--network','none','--user',f'{os.getuid()}:{os.getgid()}',
           '--memory','1800m','--cpus','2',
           '--pids-limit','192','--security-opt','no-new-privileges','--cap-drop','ALL',
-          '-e','HOME=/tmp','-v',f'{task}:/work:rw','-w',f'/work/{folder}',IMAGE,
-          'latexmk','-pdf','-interaction=nonstopmode','-halt-on-error',
-          '-pdflatex=pdflatex -no-shell-escape %O %S',texname]
-    run(cmds,timeout=180)
+          '-e','HOME=/tmp','-v',f'{task}:/work:rw','-w',f'/work/{folder}',IMAGE]
+    engine=latex_engine(tex)
+    mode={'pdflatex':'pdf','xelatex':'xelatex','lualatex':'lualatex'}[engine]
+    cmds=container+['latexmk','-norc',f'-{mode}','-interaction=nonstopmode','-halt-on-error',
+          f'-{engine}={engine} -no-shell-escape %O %S',texname]
+    try:run(cmds,timeout=180)
+    except RuntimeError as exc:
+        detail=latex_failure(tex)
+        if detail:raise RuntimeError(f'{engine}: {detail}') from exc
+        raise
     pdf=tex.with_suffix('.pdf')
-    if not pdf.exists():raise RuntimeError(f'PDF not generated for {texname}')
-    pages=run(['pdfinfo',str(pdf)],timeout=20)
+    if pdf.is_symlink() or not pdf.is_file():raise RuntimeError(f'PDF not generated for {texname}')
+    # Poppler is installed in the compiler image, not necessarily on the host.
+    pages=run(container+['pdfinfo',pdf.name],timeout=20)
     m=re.search(r'^Pages:\s*(\d+)\s*$',pages,re.MULTILINE)
-    if not m or int(m.group(1))!=1: raise RuntimeError(f'PDF must be exactly one page: {pdf} ({m.group(1) if m else "unknown"} pages)')
+    if not m or int(m.group(1))<1:raise RuntimeError(f'Cannot validate PDF page count for {texname}')
+    if require_one_page and int(m.group(1))!=1: raise RuntimeError(f'PDF must be exactly one page: {pdf} ({m.group(1)} pages)')
     return pdf
+
+
+def compile_uploaded_master(task, files, cache):
+    """Build TeX-only uploads without exposing Git, other sources, or credentials."""
+    if 'resume.tex' not in files or 'resume.pdf' in files:return files
+    digest=hashlib.sha256(files['resume.tex']).hexdigest()
+    if cache.exists():
+        if cache.is_symlink() or not cache.is_file() or cache.stat().st_size>MAX_PACKET_BYTES:
+            raise ValueError('Unsafe compiled master cache; upload your resume again.')
+        saved=json.loads(cache.read_text())
+        if saved.get('source_sha256')!=digest:
+            raise ValueError('Compiled master source changed; upload your resume again.')
+        compiled=validate_files([saved['attachment']])
+        if set(compiled)!={'resume.pdf'}:raise ValueError('Invalid compiled master cache')
+    else:
+        try:
+            # Start fresh on every failed attempt. No repo .latexmkrc, older PDF,
+            # or unrelated file is available to the uploaded TeX.
+            with tempfile.TemporaryDirectory(prefix='master-build-',dir=task) as temporary:
+                build=Path(temporary)
+                tex=build/'resume.tex';tex.write_bytes(files['resume.tex'])
+                pdf=compile_pdf(build,tex,require_one_page=False)
+                if pdf.stat().st_size>MAX_FILE_BYTES:
+                    raise ValueError('Compiled PDF exceeds the 8 MiB Discord transfer limit.')
+                attachment=encode_attachments([('resume.pdf',pdf.read_bytes())])[0]
+                compiled=validate_files([attachment])
+            # Retain identical PDF bytes across interrupted publication retries.
+            _write_intent(cache,{'source_sha256':digest,'attachment':attachment})
+        except Exception as exc:
+            raise RuntimeError(f'Master TeX compilation failed. Your previous active resume is unchanged. Upload a self-contained TeX file supported by the compiler, or supply its matching PDF with companion. {str(exc)[-1100:]}') from exc
+    return {**files,**compiled}
 
 def allowed_path(kind,path, payload):
     if path.startswith('profile/') and kind in ('profile-edit','profile-sync','master-edit','tailor'):return True
@@ -633,6 +704,7 @@ def run_upload_job(job, store):
     user=store.user(uid)
     if not user or not user.get('repo'):raise ValueError('Initialize CVPilot first')
     task,branch=new_worktree(uid,jid,'master-upload')
+    files=compile_uploaded_master(task,files,inbox_path(ROOT,uid,payload['upload_id'])/'compiled.json')
     trusted=gitworktree(uid,jid)
     directory=_source_directory(trusted,role)
     baseline=inbox_path(ROOT,uid,payload['upload_id'])/'baseline.json'
@@ -658,7 +730,7 @@ def run_upload_job(job, store):
     commit=run_git(uid,trusted,'rev-parse','HEAD')
     run_git(uid,trusted,'push','origin',f'HEAD:refs/heads/{branch}',timeout=90)
     return {'url':f'https://github.com/{user["repo"]}/tree/{quote(branch,safe="/")}',
-            'note':f'Resume saved under {role} and ready for tailoring. Use /cvpilot master get label:{role} to download it. Earlier versions remain in Git history.',
+            'note':f'Resume saved under {role} and ready for tailoring. '+('TeX compiled to PDF. ' if (inbox_path(ROOT,uid,payload['upload_id'])/'compiled.json').exists() else '')+f'Use /cvpilot master get label:{role} to download it. Earlier versions remain in Git history.',
             'label':role,'commit':commit,'base_files':base,
             'artifacts':[{'path':f'master-resumes/{role}/{name}'} for name in sorted(files)]}
 

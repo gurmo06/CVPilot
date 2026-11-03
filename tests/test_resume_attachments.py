@@ -135,6 +135,67 @@ class ResumeWorkflowTests(unittest.TestCase):
                          {'resume.pdf':PDF+b'new version'})
         self.assertEqual(len(self.call('download',{'job_id':first['id']})['attachments']),2)
 
+    def test_tex_only_upload_compiles_in_isolation_and_downloads_both_files(self):
+        builds=[]
+        def compile_master(task,tex,**kwargs):
+            self.assertFalse(kwargs['require_one_page'])
+            self.assertEqual(list(task.iterdir()),[tex])
+            self.assertEqual(tex.read_bytes(),TEX)
+            builds.append(task)
+            pdf=tex.with_suffix('.pdf');pdf.write_bytes(PDF);return pdf
+        with mock.patch.object(worker,'compile_pdf',side_effect=compile_master) as compile_mock:
+            job,result=self.upload('teaching',attachments(('my-master.tex',TEX)))
+        compile_mock.assert_called_once()
+        self.assertFalse(builds[0].exists())
+        self.assertIn('TeX compiled to PDF',result['note'])
+        expected={'resume.pdf':PDF,'resume.tex':TEX}
+        self.assertEqual(resumes.validate_files(self.call('master',{'operation':'get','role':'teaching'})['attachments']),expected)
+        worker.cleanup_completed(UID,job['id'])
+        self.assertEqual(resumes.validate_files(self.call('download',{'job_id':job['id']})['attachments']),expected)
+        task,_=worker.new_worktree(UID,103,'profile-sync')
+        worker.apply_uploaded_sources(UID,self.store,task)
+        self.assertEqual((task/'master-resumes/teaching/resume.pdf').read_bytes(),PDF)
+        self.assertEqual(self.git('-C',str(self.remote),'rev-parse','main'),self.original_main)
+
+    def test_supplied_pdf_only_and_pdf_tex_pair_skip_compilation(self):
+        with mock.patch.object(worker,'compile_pdf',side_effect=AssertionError('unexpected compilation')):
+            self.upload('general',attachments(('resume.pdf',PDF)))
+            _,result=self.upload('general')
+        self.assertNotIn('TeX compiled',result['note'])
+
+    def test_failed_tex_compilation_keeps_previous_active_resume_and_no_remote_branch(self):
+        previous,_=self.upload('general',attachments(('resume.pdf',PDF)))
+        self.call('master',{'operation':'upload','files':attachments(('resume.tex',TEX))})
+        job=self.store.claim()
+        with mock.patch.object(worker,'compile_pdf',side_effect=RuntimeError('Missing package example.sty')):
+            with self.assertRaisesRegex(RuntimeError,'Master TeX compilation failed.*Missing package') as raised:
+                worker.run_upload_job(job,self.store)
+        self.store.finish(job['id'],'failed',error=str(raised.exception))
+        self.assertEqual(self.store.latest_uploads(UID)['general']['commit'],json.loads(self.store.job(previous['id'])['result'])['commit'])
+        self.assertEqual(resumes.validate_files(self.call('master',{'operation':'get'})['attachments']),{'resume.pdf':PDF})
+        self.assertEqual(self.git('-C',str(self.remote),'branch','--list',f'cvpilot/master-upload/{job["id"]}'),'')
+        self.assertFalse(list(worker.taskdir(UID,job['id']).glob('master-build-*')))
+
+    def test_tex_upload_retry_reuses_cached_pdf_and_commit_after_push_failure(self):
+        self.call('master',{'operation':'upload','files':attachments(('resume.tex',TEX))})
+        job=self.store.claim();original=worker.run_git;attempts=[]
+        def push_fails_once(uid,directory,*args,**kwargs):
+            if args[0]=='push' and not attempts:
+                attempts.append(True);raise RuntimeError('temporary push failure')
+            return original(uid,directory,*args,**kwargs)
+        def compile_master(task,tex,**kwargs):
+            pdf=tex.with_suffix('.pdf');pdf.write_bytes(PDF);return pdf
+        with (mock.patch.object(worker,'compile_pdf',side_effect=compile_master) as compile_mock,
+              mock.patch.object(worker,'run_git',side_effect=push_fails_once)):
+            with self.assertRaisesRegex(RuntimeError,'push failure'):worker.run_upload_job(job,self.store)
+            commit=self.git('-C',str(worker.gitworktree(UID,job['id'])),'rev-parse','HEAD')
+            self.store.recover();again=self.store.claim()
+            result=worker.run_upload_job(again,self.store)
+        compile_mock.assert_called_once()
+        self.assertEqual(result['commit'],commit)
+        cache=resumes.inbox_path(self.state,UID,json.loads(job['payload'])['upload_id'])/'compiled.json'
+        self.assertEqual(cache.stat().st_mode&0o777,0o600)
+
     def test_default_label_is_general_and_other_accounts_cannot_download(self):
         self.call('master',{'operation':'upload','files':attachments(('cv.pdf',PDF))})
         job=self.store.claim()
@@ -284,6 +345,88 @@ class ResumeWorkflowTests(unittest.TestCase):
             self.assertEqual(resumes.staged_files(self.state,UID,payload)['resume.pdf'],data)
         finally:
             server.shutdown();server.server_close();thread.join()
+
+
+class CompilationTests(unittest.TestCase):
+    def test_engine_selection_preserves_standard_tex_and_supports_fontspec_and_directives(self):
+        cases=[(TEX,'pdflatex'),
+               (b'\\usepackage{fontspec}\n\\setmainfont{Carlito}','xelatex'),
+               (b'\\usepackage[option]{xcolor, unicode-math}','xelatex'),
+               (b'\\setsansfont{Carlito}','xelatex'),
+               (b'% \\usepackage{fontspec}\n'+TEX,'pdflatex'),
+               (b'% !TeX program = XeLaTeX\n'+TEX,'xelatex'),
+               (b'% !TEX TS-program = lualatex\n'+TEX,'lualatex'),
+               (b'% !TeX program = pdflatex\n\\usepackage{fontspec}','pdflatex'),
+               (b'% !TeX program = arbitrary-command\n'+TEX,'pdflatex')]
+        with tempfile.TemporaryDirectory() as directory:
+            tex=Path(directory)/'resume.tex'
+            for source,engine in cases:
+                with self.subTest(source=source):
+                    tex.write_bytes(source)
+                    self.assertEqual(worker.latex_engine(tex),engine)
+
+    def test_fontspec_uses_xelatex_and_reports_actual_error_instead_of_latexmk_footer(self):
+        with tempfile.TemporaryDirectory() as directory:
+            task=Path(directory);tex=task/'resume.tex';tex.write_bytes(b'\\usepackage{fontspec}')
+            def run(args,**kwargs):
+                self.assertIn('-xelatex',args)
+                self.assertIn('-xelatex=xelatex -no-shell-escape %O %S',args)
+                tex.with_suffix('.log').write_text('Build output\n! Package fontspec Error: The font "MissingFont" cannot be found.\n\nFor help\nl.45 \\setmainfont{MissingFont}\n')
+                raise RuntimeError('Latexmk: If appropriate, the -f option can be used')
+            with mock.patch.object(worker,'run',side_effect=run):
+                with self.assertRaisesRegex(RuntimeError,'xelatex: Package fontspec Error:.*MissingFont.*l.45') as error:
+                    worker.compile_pdf(task,tex)
+            self.assertNotIn('the -f option',str(error.exception))
+
+    def test_compiler_runtime_error_without_tex_log_is_preserved(self):
+        with tempfile.TemporaryDirectory() as directory:
+            task=Path(directory);tex=task/'resume.tex';tex.write_bytes(TEX)
+            with mock.patch.object(worker,'run',side_effect=RuntimeError('Docker image unavailable')):
+                with self.assertRaisesRegex(RuntimeError,'Docker image unavailable'):
+                    worker.compile_pdf(task,tex)
+
+    def test_page_validation_runs_in_networkless_compiler_and_sources_can_be_multipage(self):
+        with tempfile.TemporaryDirectory() as directory:
+            task=Path(directory);tex=task/'resume.tex';tex.write_bytes(TEX)
+            calls=[]
+            def run(args,**kwargs):
+                calls.append(args)
+                if 'latexmk' in args:
+                    tex.with_suffix('.pdf').write_bytes(PDF);return ''
+                return 'Pages:          2'
+            with mock.patch.object(worker,'run',side_effect=run):
+                worker.compile_pdf(task,tex,require_one_page=False)
+                with self.assertRaisesRegex(RuntimeError,'exactly one page'):worker.compile_pdf(task,tex)
+            self.assertIn('-norc',calls[0])
+            self.assertIn('-pdflatex=pdflatex -no-shell-escape %O %S',calls[0])
+            for args in calls:
+                self.assertEqual(args[:3],['docker','run','--rm'])
+                self.assertEqual(args[args.index('--network')+1],'none')
+                self.assertIn('no-new-privileges',args)
+            self.assertEqual(calls[1][-2:],['pdfinfo','resume.pdf'])
+
+    def test_missing_empty_and_oversized_generated_pdf_fail_before_caching(self):
+        with tempfile.TemporaryDirectory() as directory:
+            task=Path(directory);cache=task/'compiled.json'
+            for contents in (b'',b'invalid',PDF*2):
+                def compile_master(build,tex,**kwargs):
+                    pdf=tex.with_suffix('.pdf');pdf.write_bytes(contents);return pdf
+                with (self.subTest(contents=contents),
+                      mock.patch.object(worker,'compile_pdf',side_effect=compile_master),
+                      mock.patch.object(worker,'MAX_FILE_BYTES',len(PDF))):
+                    with self.assertRaisesRegex(RuntimeError,'Master TeX compilation failed'):
+                        worker.compile_uploaded_master(task,{'resume.tex':TEX},cache)
+                self.assertFalse(cache.exists())
+                self.assertEqual(list(task.iterdir()),[])
+
+    def test_cache_is_bound_to_uploaded_tex(self):
+        with tempfile.TemporaryDirectory() as directory:
+            task=Path(directory);cache=task/'compiled.json'
+            cache.write_text(json.dumps({'source_sha256':'different-source','attachment':attachments(('resume.pdf',PDF))[0]}))
+            with mock.patch.object(worker,'compile_pdf') as compile_mock:
+                with self.assertRaisesRegex(ValueError,'source changed'):
+                    worker.compile_uploaded_master(task,{'resume.tex':TEX},cache)
+            compile_mock.assert_not_called()
 
 
 class NotificationTests(unittest.TestCase):
