@@ -1,11 +1,45 @@
-import json, os, re, socketserver, threading, time
+import json, os, re, socketserver, threading, time, secrets, hmac
 from pathlib import Path
 from store import Store
 from resumes import label, stage_upload, MAX_PACKET_BYTES
 
 UID_RE=re.compile(r'^[0-9]{16,22}$')
 USERNAME_RE=re.compile(r'^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$')
-ALLOWED={'init','repo','settings','status','tailor','master','profile','answer','download'}
+ALLOWED={'init','repo','settings','status','tailor','master','profile','answer','download','reset'}
+
+RESET_CONFIRM_TTL=120
+_RESET_CONFIRMATIONS={}
+_RESET_LOCK=threading.Lock()
+
+
+def reset_request(uid, args, user, store):
+    operation=args.get('operation','prepare')
+    with _RESET_LOCK:
+        now=time.monotonic()
+        for key in list(_RESET_CONFIRMATIONS):
+            if _RESET_CONFIRMATIONS[key]['expires']<=now:del _RESET_CONFIRMATIONS[key]
+        pending=_RESET_CONFIRMATIONS.get(uid)
+        if operation=='prepare':
+            with store.tx() as c:
+                if c.execute("SELECT 1 FROM jobs WHERE discord_id=? AND state IN ('queued','running') LIMIT 1",(uid,)).fetchone():
+                    raise ValueError('Wait for your queued/running jobs to finish before resetting. Use /cvpilot status.')
+            token=secrets.token_urlsafe(32)
+            _RESET_CONFIRMATIONS[uid]={'token':token,'repo':user['repo'],'expires':now+RESET_CONFIRM_TTL}
+            return {'text':f"Reset https://github.com/{user['repo']}?\nThis replaces all files on main with the initial CVPilot template and deletes EVERY other branch, including branches you created. Earlier uploads and tailored downloads stop being available in CVPilot. Git history and a private recovery backup remain; this is not secure erasure. Your account, keys and job history stay.\nChoose Reset repository, then type RESET to confirm. This request expires in 2 minutes.",
+                    'confirmation_token':token,'repo':user['repo']}
+        token=args.get('token','')
+        if (not pending or not isinstance(token,str) or not hmac.compare_digest(pending['token'],token)
+                or pending['repo']!=user['repo']):
+            raise ValueError('Reset confirmation expired or no longer matches your repository. Run /cvpilot reset again.')
+        if operation=='cancel':
+            del _RESET_CONFIRMATIONS[uid]
+            return {'text':'Reset cancelled. Your repository was not changed.'}
+        if operation!='confirm' or args.get('confirmation')!='RESET':
+            raise ValueError('Type RESET exactly to confirm the repository reset.')
+        jid=store.enqueue(uid,'reset',{'repo':pending['repo'],'confirmed':True})
+        del _RESET_CONFIRMATIONS[uid]
+        return {'text':f'Repository reset queued as job #{jid}. Check /cvpilot status. Other resume actions are blocked until it finishes.'}
+
 
 def process(req, store):
     uid=str(req.get('sender_id',''))
@@ -39,6 +73,8 @@ def process(req, store):
         jid=store.enqueue(uid,'init',{'github_username':username})
         return {'text':f'Initialization queued as job #{jid}. `/cvpilot status` shows progress.'}
     if not user or not user.get('repo'): raise ValueError('Please initialize with /cvpilot init first')
+    if action=='reset':return reset_request(uid,args,user,store)
+    if store.reset_blocked(uid):raise ValueError('Repository reset is pending or incomplete. Check /cvpilot status and retry /cvpilot reset if it failed.')
     if action=='download':
         from worker import download_job
         return download_job(uid,args.get('job_id'),store)

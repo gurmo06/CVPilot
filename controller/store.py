@@ -42,6 +42,13 @@ class Store:
     def enqueue(self, uid, kind, payload):
         import json
         with self.tx() as c:
+            if kind=='reset':
+                if c.execute("SELECT 1 FROM jobs WHERE discord_id=? AND state IN ('queued','running') LIMIT 1",(uid,)).fetchone():
+                    raise ValueError('Wait for your queued/running jobs to finish before resetting. Use /cvpilot status.')
+            else:
+                last=c.execute("SELECT state FROM jobs WHERE discord_id=? AND kind='reset' ORDER BY id DESC LIMIT 1",(uid,)).fetchone()
+                if last and last['state']!='done':
+                    raise ValueError('Repository reset is pending or incomplete. Check /cvpilot status and retry /cvpilot reset if it failed.')
             result=c.execute('INSERT INTO jobs(discord_id,kind,payload) VALUES(?,?,?)', (uid,kind,json.dumps(payload))).lastrowid
         return result
     def claim(self):
@@ -73,7 +80,7 @@ class Store:
     def latest_uploads(self, uid):
         import json
         with closing(self.connection()) as c:
-            rows=c.execute("SELECT result FROM jobs WHERE discord_id=? AND kind='master-upload' AND state='done' ORDER BY id DESC",(uid,)).fetchall()
+            rows=c.execute("SELECT result FROM jobs WHERE discord_id=? AND kind='master-upload' AND state='done' AND id>(SELECT COALESCE(MAX(id),0) FROM jobs WHERE discord_id=? AND kind='reset' AND state='done') ORDER BY id DESC",(uid,uid)).fetchall()
         uploads={}
         for row in rows:
             result=json.loads(row['result'] or '{}')
@@ -83,5 +90,13 @@ class Store:
     def latest_download(self, uid):
         import json
         with closing(self.connection()) as c:
-            rows=c.execute("SELECT id,result FROM jobs WHERE discord_id=? AND state='done' ORDER BY id DESC",(uid,)).fetchall()
+            rows=c.execute("SELECT id,result FROM jobs WHERE discord_id=? AND state='done' AND id>(SELECT COALESCE(MAX(id),0) FROM jobs WHERE discord_id=? AND kind='reset' AND state='done') ORDER BY id DESC",(uid,uid)).fetchall()
         return next((row['id'] for row in rows if json.loads(row['result'] or '{}').get('artifacts')),None)
+
+    def reset_cutoff(self, uid):
+        with closing(self.connection()) as c:
+            return c.execute("SELECT COALESCE(MAX(id),0) FROM jobs WHERE discord_id=? AND kind='reset' AND state='done'",(uid,)).fetchone()[0]
+    def reset_blocked(self, uid):
+        with closing(self.connection()) as c:
+            row=c.execute("SELECT state FROM jobs WHERE discord_id=? AND kind='reset' ORDER BY id DESC LIMIT 1",(uid,)).fetchone()
+        return bool(row and row['state']!='done')

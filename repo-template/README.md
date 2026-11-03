@@ -50,3 +50,23 @@ and preserves existing formatting when TeX is available. With PDF-only sources,
 it creates a clean new layout instead of claiming an exact formatting match.
 AI edits to source resumes require both account permission and an explicit edit
 request. User-supplied uploads are themselves explicit source updates.
+
+## Start over with a confirmed reset
+
+Run `/cvpilot reset` in the server channel or in a DM. Read the private summary,
+select **Reset repository**, and type **RESET** in the confirmation form within
+2 minutes. Only the requesting user can confirm, and permissions are checked
+again. Cancel or let the prompt expire to leave the repository unchanged.
+
+A confirmed reset replaces the files on `main` with the current initial CVPilot
+template and deletes every other branch, including branches you created. Old
+uploads and generated resumes stop being available through CVPilot. Your account,
+SSH keys, agent and job history remain, so upload a new resume to begin again.
+Git history and a private operator recovery backup remain; reset is not secure
+erasure. Tags are unchanged. Branch protection is never bypassed or disabled.
+
+Wait for all your jobs to finish before resetting. Other resume actions are
+blocked while a reset is pending or incomplete. If it fails, inspect
+`/cvpilot status` and run a fresh confirmed reset after resolving the reported
+problem. The remote branch update and deletions are atomic and reject branch
+changes made concurrently. No reset happens merely by opening the command.

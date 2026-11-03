@@ -671,6 +671,7 @@ def download_job(uid, job_id, store):
     if not job or job['discord_id']!=uid:
         raise ValueError('No downloadable resume found for your account and that job ID.')
     if job['state']!='done':raise ValueError('That job is not complete. Check /cvpilot status.')
+    if job_id<=store.reset_cutoff(uid):raise ValueError('Files from before your last repository reset are no longer available in CVPilot.')
     result=json.loads(job['result'] or '{}')
     files=artifact_files(repopath(uid),result)
     if not files:raise ValueError('This job has no attached resume files. Use its GitHub link.')
@@ -770,6 +771,9 @@ def cleanup_completed(uid, jid):
 def work(job,store):
     if job['kind']=='init':return repo_init(job,store)
     if job['kind']=='master-upload':return run_upload_job(job,store)
+    if job['kind']=='reset':
+        from reset_repo import reset_repository
+        return reset_repository(job,store)
     if job['kind']=='master-edit':
         u=store.user(job['discord_id'])
         if not u or not u['master_edit']:raise RuntimeError('Master editing was disabled before this job began')
