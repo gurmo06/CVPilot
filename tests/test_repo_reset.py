@@ -143,6 +143,8 @@ class ResetWorkflowTests(unittest.TestCase):
 
     def test_confirmed_reset_restores_template_deletes_all_other_branches_and_preserves_account(self):
         uploaded,_=self.fixture.upload('teaching')
+        original_task,_=worker.new_worktree(UID,901,'profile-sync')
+        staged=worker.stage_agent_task(UID,901,original_task)
         user=self.store.user(UID)
         job=self.claim_reset();result=self.finish_reset(job)
         self.assertTrue(result['reset'])
@@ -161,6 +163,8 @@ class ResetWorkflowTests(unittest.TestCase):
         self.assertIsNone(self.store.latest_download(UID))
         self.assertEqual(self.store.job(uploaded['id'])['state'],'done')
         backups=self.state/'reset-backups'/UID/str(job['id'])
+        self.assertTrue((backups/'sandbox-tasks/901/README.md').is_file())
+        self.assertFalse(staged.exists())
         self.assertTrue((backups/'checkout/.git').is_dir())
         journal=json.loads((backups/'reset.json').read_text())
         self.assertTrue(journal['complete'])

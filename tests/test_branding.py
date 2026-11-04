@@ -24,6 +24,8 @@ class BrandingTests(unittest.TestCase):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name)
+        patch=mock.patch.object(worker,'agent_workspace',side_effect=lambda uid:self.root/'.openclaw'/f'workspace-career-{uid}')
+        patch.start();self.addCleanup(patch.stop)
         self.store = Store(self.root / 'jobs.sqlite')
         # Store's existing helpers do not close read connections; close every
         # connection opened by these new tests without changing production scope.
@@ -72,10 +74,10 @@ class BrandingTests(unittest.TestCase):
                           mock.patch.object(main_commits,'begin',return_value={}),
                           mock.patch.object(main_commits,'publish',side_effect=publish) as published,
                           mock.patch.object(worker, 'gitworktree', return_value=trusted),
-                          mock.patch.object(worker, 'run', return_value='') as agent,
+                          mock.patch.object(worker, 'run', return_value=json.dumps({'status':'ok'})) as agent,
                           mock.patch.object(worker, 'run_git', side_effect=fake_git) as git):
                         result = worker.run_resume_job({'discord_id': UID, 'id': 1,
-                            'kind': 'profile-sync', 'payload': '{}'}, self.store)
+                            'kind': 'profile-edit', 'payload': '{}'}, self.store)
                     suffix = '/commit/'+('a'*40)
                     self.assertEqual(result['url'], f'https://github.com/{repo}{suffix}')
                     self.assertEqual(agent.call_args.args[0][3], f'career-{UID}')

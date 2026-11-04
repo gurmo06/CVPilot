@@ -286,7 +286,9 @@ class InitRecoveryTests(unittest.TestCase):
             skill=template/'skills'/name
             skill.mkdir(parents=True)
             (skill/'SKILL.md').write_text(name)
+        commands=[]
         def fake_agent_run(args,**kwargs):
+            commands.append(args)
             if args[:3]==['openclaw','agents','list']:
                 return '[]'
             if args[:4]==['openclaw','config','get','bindings']:
@@ -298,6 +300,10 @@ class InitRecoveryTests(unittest.TestCase):
         target=self.root/'.openclaw'/f'workspace-career-{UID}'/'skills'
         self.assertEqual((target/'career-resume'/'SKILL.md').read_text(),'career-resume')
         self.assertEqual((target/'career-source-sync'/'SKILL.md').read_text(),'career-source-sync')
+        binds=[call for call in commands if '.sandbox.docker.binds' in ' '.join(map(str,call))]
+        self.assertEqual(json.loads(binds[0][4]),[f'{self.root}/.openclaw/workspace-career-{UID}/cvpilot-jobs:/career:rw'])
+        self.assertIn(['openclaw','config','set',f'agents.entries.career-{UID}.tools.exec.host','sandbox'],commands)
+        self.assertFalse(any('dangerouslyAllow' in ' '.join(call) for call in commands))
 
     def test_create_permission_failure_keeps_intent(self):
         self.gh.deny_create=True

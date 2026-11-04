@@ -70,8 +70,9 @@ def publish(w, job, store, draft=None):
             if parents!=[head,record['base']] or w.run_git(uid,trusted,'show','-s','--format=%s',head)!=message:
                 raise ValueError('Interrupted job checkout changed; refusing main publication')
         if not OID.fullmatch(head):raise ValueError('Invalid publication commit')
-        record['result']={**record['draft'],'commit':head,'on_main':True,
-                          'url':f'https://github.com/{record["repo"]}/commit/{head}'}
+        changed=head!=record['base']
+        record['result']={**record['draft'],'commit':head,'on_main':True,'changed':changed,
+                          'url':f'https://github.com/{record["repo"]}/'+(f'commit/{head}' if changed else 'tree/main')}
         w._write_intent(journal_path(w,job),record)
     result=record['result'];commit=result.get('commit','')
     if not OID.fullmatch(commit):raise ValueError('Invalid recorded publication commit')

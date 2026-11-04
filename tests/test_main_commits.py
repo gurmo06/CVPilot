@@ -47,14 +47,14 @@ class MainCommitTests(unittest.TestCase):
         original=worker.run
         def agent(argv,**kwargs):
             if argv[0]=='openclaw':
-                task=next((worker.ROOT/'user-workspaces'/UID/'tasks').iterdir())
+                task=next((worker.agent_task_root(UID)/'tasks').iterdir())
                 path=task/'profile/MASTER_PROFILE.md';path.parent.mkdir(parents=True,exist_ok=True)
-                path.write_text(contents);return ''
+                path.write_text(contents);return fixtures.AGENT_OK
             return original(argv,**kwargs)
         return agent
 
     def profile(self,contents):
-        jid=self.store.enqueue(UID,'profile-sync',{});job=self.store.claim()
+        jid=self.store.enqueue(UID,'profile-edit',{'instructions':'Update profile with verified facts'});job=self.store.claim()
         with mock.patch.object(worker,'run',side_effect=self.profile_agent(contents)):
             result=worker.work(job,self.store)
         self.store.finish(jid,'done',result);worker.cleanup_completed(UID,jid)
@@ -85,10 +85,10 @@ class MainCommitTests(unittest.TestCase):
         job=self.store.claim();original=worker.run
         def agent(argv,**kwargs):
             if argv[0]=='openclaw':
-                task=worker.taskdir(UID,jid)
+                task=worker.agent_taskdir(UID,jid)
                 (task/'profile/MASTER_PROFILE.md').unlink()
                 (task/'README.md').write_text('Unexpected change must not publish')
-                return ''
+                return fixtures.AGENT_OK
             return original(argv,**kwargs)
         with mock.patch.object(worker,'run',side_effect=agent):result=self.finish(job)
         self.assertEqual(self.main(),result['commit'])
@@ -103,7 +103,7 @@ class MainCommitTests(unittest.TestCase):
         job=self.store.claim();original=worker.run;new_pdf=fixtures.PDF+b'new';new_tex=fixtures.TEX+b'new'
         def agent(argv,**kwargs):
             if argv[0]=='openclaw':
-                (worker.taskdir(UID,jid)/'master-resumes/general/resume.tex').write_bytes(new_tex);return ''
+                (worker.agent_taskdir(UID,jid)/'master-resumes/general/resume.tex').write_bytes(new_tex);return fixtures.AGENT_OK
             return original(argv,**kwargs)
         def compile_pdf(task,tex):tex.with_suffix('.pdf').write_bytes(new_pdf)
         with mock.patch.object(worker,'run',side_effect=agent),mock.patch.object(worker,'compile_pdf',side_effect=compile_pdf):
@@ -127,7 +127,7 @@ class MainCommitTests(unittest.TestCase):
     def test_publication_recovers_crash_before_commit_or_after_commit_without_rerunning_agent(self):
         for phase in ('draft','result'):
             with self.subTest(phase=phase):
-                jid=self.store.enqueue(UID,'profile-sync',{});job=self.store.claim();original=worker._write_intent
+                jid=self.store.enqueue(UID,'profile-edit',{});job=self.store.claim();original=worker._write_intent
                 def interrupt(path,record):
                     original(path,record)
                     if phase in record:raise SystemExit('simulated process crash')

@@ -137,6 +137,7 @@ def reset_repository(job,store):
     # Preserve old scratch/source state privately instead of mixing it into
     # a future job. The agent workspace mount, keys and bindings remain intact.
     for source,name in [(w.ROOT/'user-workspaces'/uid/'tasks','tasks'),
+                        (w.agent_task_root(uid)/'tasks','sandbox-tasks'),
                         (w.ROOT/'git-worktrees'/uid,'worktrees'),
                         (w.ROOT/'resume-inbox'/uid,'resume-inbox')]:
         if source.is_symlink():raise ValueError('Unsafe private reset source directory')

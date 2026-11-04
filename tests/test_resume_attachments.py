@@ -23,6 +23,7 @@ UID='123456789012345678'
 OTHER='223456789012345678'
 PDF=b'%PDF-1.4\nTEST RESUME CONTENT\n%%EOF\n'
 TEX=b'\\documentclass{article}\\begin{document}Verified teaching experience\\end{document}'
+AGENT_OK=json.dumps({'status':'ok','result':{'payloads':[{'text':'Completed requested edits.'}],'meta':{}}})
 
 
 def attachments(*files):
@@ -70,6 +71,7 @@ class ResumeWorkflowTests(unittest.TestCase):
         self.root=Path(temporary.name);self.state=self.root/'state'
         self.store=Store(self.state/'jobs.sqlite')
         self.patch(worker,'ROOT',self.state)
+        self.patch(worker,'agent_workspace',lambda uid:self.root/'.openclaw'/f'workspace-career-{uid}')
         self.patch(worker,'git_env',lambda uid:os.environ.copy())
         self.remote=self.root/'remote.git';self.seed=self.root/'seed'
         self.git('init','--bare','-b','main',str(self.remote))
@@ -269,12 +271,12 @@ class ResumeWorkflowTests(unittest.TestCase):
         self.assertFalse((worker.repopath(UID)/'master-resumes/general/resume.pdf').exists())
         def agent(args,**kwargs):
             if args[0]=='openclaw':
-                task=worker.taskdir(UID,200)
+                task=worker.agent_taskdir(UID,200)
                 self.assertEqual((task/'master-resumes/general/resume.pdf').read_bytes(),PDF)
                 destination=task/'applications/2026/job-200';destination.mkdir(parents=True)
                 (destination/'resume.tex').write_bytes(TEX)
                 (destination/'job-url.txt').write_text('https://example.org/job')
-                return ''
+                return AGENT_OK
             return original_run(args,**kwargs)
         original_run=worker.run
         def compile_pdf(task,target):

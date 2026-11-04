@@ -97,3 +97,15 @@ blocked while a reset is pending or incomplete. If it fails, inspect
 `/cvpilot status` and run a fresh confirmed reset after resolving the reported
 problem. The remote branch update and deletions are atomic and reject branch
 changes made concurrently. No reset happens merely by opening the command.
+
+## Sync verified profile facts
+
+Run `/cvpilot profile sync` after uploading sources. CVPilot reads the source
+resumes and updates both the profile and its source records on main. Source
+records include the exact SHA-256 of every current PDF/TeX input; verified facts
+cite those sources. Existing user-confirmed facts are preserved.
+
+If the profile and sources are already current, the result says no new commit
+was created and links to main. An agent that cannot read or update the files,
+returns an error, or leaves only the starter profile cannot report a successful
+sync. Fix the reported blocker and submit a fresh sync.
