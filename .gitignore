@@ -3,6 +3,7 @@
 .env.*
 !.env.example
 controller.env
+openclaw.json
 *.pem
 *.key
 id_ed25519*

@@ -1,0 +1,366 @@
+{
+  "telemetry": {
+    "enabled": true
+  },
+  "plugins": {
+    "entries": {
+      "anthropic": {
+        "config": {
+          "sessionCatalog": {
+            "enabled": false
+          }
+        }
+      },
+      "codex": {
+        "config": {
+          "sessionCatalog": {
+            "enabled": false
+          }
+        }
+      },
+      "ollama": {
+        "enabled": true
+      },
+      "discord": {
+        "enabled": true
+      },
+      "duckduckgo": {
+        "enabled": true
+      },
+      "cvpilot": {
+        "enabled": true
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "models": {
+        "ollama/gpt-oss:20b": {
+          "agentRuntime": {
+            "id": "openclaw"
+          }
+        }
+      },
+      "model": "ollama/gpt-oss:20b",
+      "authInheritance": {
+        "agentId": "main"
+      },
+      "workspace": "/home/USER/.openclaw/workspace",
+      "sandbox": {
+        "mode": "all",
+        "docker": {
+          "network": "bridge"
+        }
+      },
+      "maxConcurrent": 1,
+      "systemAgent": {
+        "agentId": "chat"
+      }
+    },
+    "ownership": "explicit",
+    "entries": {
+      "chat": {
+        "name": "CVPilot assistant",
+        "workspace": "/home/USER/.openclaw/workspace",
+        "agentDir": "/home/USER/.openclaw/agents/chat/agent",
+        "identity": {
+          "name": "CVPilot assistant"
+        }
+      },
+      "career-example-user": {
+        "name": "CVPilot example user",
+        "workspace": "/home/USER/.openclaw/workspace-career-example-user",
+        "agentDir": "/home/USER/.openclaw/agents/career-example-user/agent",
+        "identity": {
+          "name": "CVPilot example user"
+        },
+        "model": "ollama/gpt-oss:20b",
+        "sandbox": {
+          "mode": "all",
+          "backend": "docker",
+          "scope": "agent",
+          "workspaceAccess": "none",
+          "docker": {
+            "image": "openclaw-career-sandbox:1",
+            "network": "none",
+            "binds": [
+              "/home/USER/.openclaw/workspace-career-example-user/cvpilot-jobs:/career:rw"
+            ]
+          }
+        },
+        "tools": {
+          "elevated": {
+            "enabled": false
+          },
+          "exec": {
+            "host": "sandbox"
+          }
+        }
+      }
+    }
+  },
+  "models": {
+    "providers": {
+      "ollama": {
+        "baseUrl": "http://127.0.0.1:11434",
+        "api": "ollama",
+        "models": [
+          {
+            "id": "gpt-oss:20b",
+            "name": "gpt-oss:20b",
+            "reasoning": true,
+            "input": [
+              "text"
+            ],
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0
+            },
+            "contextWindow": 131072,
+            "maxTokens": 8192,
+            "compat": {
+              "supportsTools": true,
+              "supportsUsageInStreaming": true,
+              "supportsJsonSchemaResponseFormat": true
+            },
+            "contextTokens": 65536
+          }
+        ],
+        "apiKey": "${OLLAMA_API_KEY}"
+      }
+    }
+  },
+  "gateway": {
+    "mode": "local",
+    "auth": {
+      "mode": "token",
+      "token": "${OPENCLAW_GATEWAY_TOKEN}"
+    },
+    "port": 18789,
+    "bind": "loopback",
+    "tailscale": {
+      "mode": "off"
+    }
+  },
+  "tools": {
+    "profile": "full",
+    "exec": {
+      "host": "gateway"
+    },
+    "web": {
+      "search": {
+        "provider": "duckduckgo",
+        "enabled": true,
+        "openaiCodex": {}
+      },
+      "fetch": {
+        "enabled": true
+      }
+    },
+    "sandbox": {
+      "tools": {
+        "alsoAllow": [
+          "web_fetch",
+          "web_search"
+        ]
+      }
+    },
+    "toolSearch": false
+  },
+  "hooks": {
+    "internal": {
+      "entries": {
+        "session-memory": {
+          "enabled": true
+        }
+      }
+    }
+  },
+  "skills": {
+    "entries": {
+      "1password": {
+        "enabled": false
+      },
+      "blogwatcher": {
+        "enabled": false
+      },
+      "blucli": {
+        "enabled": false
+      },
+      "camsnap": {
+        "enabled": false
+      },
+      "coding-agent": {
+        "enabled": false
+      },
+      "eightctl": {
+        "enabled": false
+      },
+      "gemini": {
+        "enabled": false
+      },
+      "gh-issues": {
+        "enabled": false
+      },
+      "gifgrep": {
+        "enabled": false
+      },
+      "github": {
+        "enabled": false
+      },
+      "gog": {
+        "enabled": false
+      },
+      "goplaces": {
+        "enabled": false
+      },
+      "himalaya": {
+        "enabled": false
+      },
+      "mcporter": {
+        "enabled": false
+      },
+      "model-usage": {
+        "enabled": false
+      },
+      "nano-pdf": {
+        "enabled": false
+      },
+      "obsidian": {
+        "enabled": false
+      },
+      "openai-whisper": {
+        "enabled": false
+      },
+      "openai-whisper-api": {
+        "enabled": false
+      },
+      "openhue": {
+        "enabled": false
+      },
+      "oracle": {
+        "enabled": false
+      },
+      "ordercli": {
+        "enabled": false
+      },
+      "sag": {
+        "enabled": false
+      },
+      "sherpa-onnx-tts": {
+        "enabled": false
+      },
+      "songsee": {
+        "enabled": false
+      },
+      "sonoscli": {
+        "enabled": false
+      },
+      "spotify-player": {
+        "enabled": false
+      },
+      "summarize": {
+        "enabled": false
+      },
+      "trello": {
+        "enabled": false
+      },
+      "xurl": {
+        "enabled": false
+      }
+    }
+  },
+  "channels": {
+    "discord": {
+      "enabled": true,
+      "token": "${CVPILOT_DISCORD_TOKEN}",
+      "groupPolicy": "allowlist",
+      "guilds": {
+        "YOUR_DISCORD_GUILD_ID": {
+          "requireMention": true
+        }
+      },
+      "dmPolicy": "pairing",
+      "autoPresence": {
+        "enabled": true,
+        "intervalMs": 30000,
+        "minUpdateIntervalMs": 15000
+      },
+      "heartbeatVisibility": {
+        "showOk": true,
+        "showAlerts": true,
+        "useIndicator": true
+      },
+      "commands": {
+        "native": false,
+        "nativeSkills": false
+      },
+      "agentComponents": {
+        "enabled": false
+      }
+    }
+  },
+  "commands": {
+    "ownerAllowFrom": [
+      "discord:YOUR_DISCORD_OWNER_ID"
+    ],
+    "native": false,
+    "allowFrom": {
+      "discord": [
+        "YOUR_DISCORD_OWNER_ID"
+      ]
+    },
+    "nativeSkills": false,
+    "text": true,
+    "bash": false,
+    "config": false,
+    "mcp": false,
+    "plugins": false,
+    "debug": false
+  },
+  "memory": {
+    "search": {
+      "provider": "ollama",
+      "model": "nomic-embed-text"
+    }
+  },
+  "auth": {
+    "profiles": {
+      "ollama:local": {
+        "provider": "ollama",
+        "mode": "token"
+      }
+    }
+  },
+  "messages": {
+    "queue": {
+      "byChannel": {
+        "discord": "followup"
+      }
+    }
+  },
+  "bindings": [
+    {
+      "agentId": "career-example-user",
+      "match": {
+        "channel": "discord",
+        "peer": {
+          "kind": "direct",
+          "id": "YOUR_DISCORD_USER_ID"
+        }
+      }
+    },
+    {
+      "agentId": "chat",
+      "match": {
+        "channel": "discord",
+        "accountId": "*"
+      }
+    }
+  ],
+  "talk": {
+    "agentId": "chat"
+  }
+}
