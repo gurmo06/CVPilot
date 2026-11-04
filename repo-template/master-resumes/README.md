@@ -14,6 +14,16 @@ Reuse a label to explicitly replace its active uploaded version. Upload a PDF
 and its matching TeX together with `companion`; a new PDF-only upload does not
 reuse an older TeX file. Earlier versions are retained in Git history.
 
+Delete a source with `/cvpilot master delete label:<your-label>` or
+`/cvpilot master delete commit:<ID>` (supply one selector). Review the files,
+choose Delete resume and type DELETE within 2 minutes. This removes that label's
+entire current folder from main and CVPilot downloads, including its PDF/TeX
+pair and companion files. A commit must identify one current, unchanged resume;
+use the label or latest commit if the source has since changed. Existing profile
+facts remain; review them with profile edit or sync. Git history and previously
+sent Discord attachments remain. Restore with `/cvpilot revert` using the
+deletion commit, or upload a new source under that label.
+
 A Discord TeX-only upload automatically compiles to PDF in an isolated compiler;
 both files become available through `master get` and `download` after the upload
 job completes. Sources may have multiple pages. Use self-contained UTF-8 TeX

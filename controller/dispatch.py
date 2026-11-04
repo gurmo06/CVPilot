@@ -5,7 +5,7 @@ from resumes import label, stage_upload, MAX_PACKET_BYTES
 
 UID_RE=re.compile(r'^[0-9]{16,22}$')
 USERNAME_RE=re.compile(r'^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$')
-ALLOWED={'init','repo','settings','status','tailor','master','profile','answer','download','reset','history','revert'}
+ALLOWED={'init','repo','settings','status','tailor','master','profile','answer','download','reset','history','revert','master-delete','application-delete'}
 
 RESET_CONFIRM_TTL=120
 _RESET_CONFIRMATIONS={}
@@ -81,6 +81,9 @@ def process(req, store):
     if action=='revert':
         from repo_history import request
         return request(uid,args,user,store)
+    if action in ('master-delete','application-delete'):
+        from resume_delete import request
+        return request(uid,args,user,store,action)
     if action=='download':
         from worker import download_job
         return download_job(uid,args.get('job_id'),store)

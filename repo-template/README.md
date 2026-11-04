@@ -42,7 +42,8 @@ bot does not combine files from different versions.
 Successful uploads, resume edits, tailored applications and profile changes
 commit directly to `main` after validation. CVPilot creates no per-job branches.
 Each job links to its exact commit; saved downloads continue to retrieve the
-files from that commit even after later edits. Unchanged jobs create no extra
+files from that commit even after later edits, unless the resume is explicitly
+deleted using a delete command below. Unchanged jobs create no extra
 commit. GitHub edits to `main` are fetched before work begins. Concurrent edits
 are preserved: a job refuses to overwrite a changed `main`, and you can submit
 it again against the current files. Interrupted pushes recover from a private
@@ -50,6 +51,34 @@ publication journal without rerunning the agent or duplicating the commit.
 Existing GitHub protections are respected; direct pushes must be permitted by
 the repository's settings. New repositories retain force-push/deletion protection
 where supported, without requiring pull-request reviews.
+
+### Delete one resume
+
+- `/cvpilot master delete label:<label>` or `/cvpilot master delete commit:<ID>`
+  removes one master source folder, including its paired PDF/TeX and companion files.
+- `/cvpilot application delete link:<URL>` or `/cvpilot application delete commit:<ID>`
+  removes one tailored application's folder, including PDF, TeX, notes and posting link.
+  Use the CVPilot GitHub result link, an application folder/file link, or the original
+  posting URL if it identifies exactly one completed application.
+
+Supply exactly one selector. Commit IDs need at least 7 characters and must
+identify one resume in your main history after the latest reset. A commit for
+an older version cannot delete a newer version: use its current label, link,
+or latest commit instead. Ambiguous selections are refused.
+
+Review the private file summary, choose **Delete resume**, and type **DELETE**
+within 2 minutes. Only the requesting user with current server access can
+confirm. Cancel or let the prompt expire to make no changes. Wait for queued
+jobs to finish first; a changed repository or main requires a new preview.
+Both commands work in the server channel and DMs, without running an AI job.
+
+Deletion creates one normal commit on main. The files stop being available
+through CVPilot downloads or as master inputs. Other resumes and existing
+profile facts are kept; use profile edit or sync to review those facts. Git
+history and previously sent Discord attachments remain: this is not secure
+erasure. Restore a deletion with `/cvpilot revert commit:<deletion-commit-ID>`;
+restored files become downloadable again. Re-uploading a master label is also
+supported. No account, key, branch, or whole repository is deleted.
 
 ### Undo a change
 

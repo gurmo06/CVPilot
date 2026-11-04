@@ -127,7 +127,7 @@ class BrandingTests(unittest.TestCase):
             self.assertTrue(any(command == name or command.startswith(name + ' ') for name in names), command)
         self.assertNotIn('/career', text)
         self.assertEqual(len([cmd for cmd in listener.cvpilot.walk_commands()
-                              if not hasattr(cmd, 'commands')]), 16)
+                              if not hasattr(cmd, 'commands')]), 18)
 
 
 if __name__ == '__main__':

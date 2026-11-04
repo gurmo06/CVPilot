@@ -815,7 +815,21 @@ def run_upload_job(job, store):
 
 
 def download_job(uid, job_id, store):
-    if job_id is None:job_id=store.latest_download(uid)
+    # Keep historical artifacts pinned, but do not re-serve a deleted resume.
+    # Checking main also lets a normal revert restore downloads without DB edits.
+    from resume_delete import entries
+    deleted=store.deleted_resume_dirs(uid)
+    unavailable=set()
+    if deleted:
+        run_git(uid,repopath(uid),'fetch','origin','main')
+        unavailable={path for path in deleted if not any(name.endswith(('.pdf','.tex'))
+                     for name in entries(uid,repopath(uid),'origin/main',path))}
+    def removed(result):
+        return any(item.get('path','').startswith(path+'/')
+                   for path in unavailable for item in result.get('artifacts',[]))
+    if job_id is None:
+        job_id=next((row['id'] for row in store.download_jobs(uid)
+                     if (result:=json.loads(row['result'] or '{}')).get('artifacts') and not removed(result)),None)
     if type(job_id) is not int or job_id<=0:
         raise ValueError('No downloadable resume yet. Supply the job_id from /cvpilot status.')
     job=store.job(job_id)
@@ -824,6 +838,7 @@ def download_job(uid, job_id, store):
     if job['state']!='done':raise ValueError('That job is not complete. Check /cvpilot status.')
     if job_id<=store.reset_cutoff(uid):raise ValueError('Files from before your last repository reset are no longer available in CVPilot.')
     result=json.loads(job['result'] or '{}')
+    if removed(result):raise ValueError('That resume was deleted. Restore its deletion commit with /cvpilot revert to download it again.')
     files=artifact_files(repopath(uid),result)
     if not files:raise ValueError('This job has no attached resume files. Use its GitHub link.')
     return {'text':f'Resume files from job #{job_id}. '+result.get('url',''),
@@ -976,6 +991,9 @@ def work(job,store):
     if job['kind']=='revert':
         from repo_history import revert_commit
         return revert_commit(job,store)
+    if job['kind'] in ('master-delete','application-delete'):
+        from resume_delete import delete_resume
+        return delete_resume(job,store)
     if job['kind']=='master-edit':
         u=store.user(job['discord_id'])
         if not u or not u['master_edit']:raise RuntimeError('Master editing was disabled before this job began')

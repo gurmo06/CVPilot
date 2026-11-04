@@ -152,33 +152,29 @@ async def help_command(interaction: discord.Interaction):
         return
     help_text = (
         '**CVPilot — Quick Help**\n'
-        'Use #cvpilot or DM CVPilot with the server-issued role. DM permissions are checked each time.\n\n'
-        '**Getting started**\n'
-        '`/cvpilot init github_username:<your GitHub username>` — Create your private repo.\n'
-        '`/cvpilot repo` — View the repository link.\n'
-        '`/cvpilot status` — Check queued work and results.\n\n'
+        'Use #cvpilot or DM CVPilot with your current server role.\n\n'
+        '`/cvpilot init github_username:<name>` — Create a private repo.\n'
+        '`/cvpilot repo` — Repository link.\n'
+        '`/cvpilot status` — Jobs and results.\n\n'
         '**Applications**\n'
-        '`/cvpilot tailor url:<job posting URL>` — Get a tailored one-page PDF and TeX by private DM.\n'
-        '`/cvpilot download job_id:<id>` — Get saved files privately; omit ID for latest.\n\n'
+        '`/cvpilot tailor url:<posting>` — One-page PDF/TeX by private DM.\n'
+        '`/cvpilot download job_id:<id>` — Private files; omit ID for latest.\n'
+        '`/cvpilot application delete link:<URL>` or `commit:<ID>` — Delete one application.\n\n'
         '**Master resumes**\n'
-        '`/cvpilot master get label:<label>` — Download your saved source resume here privately.\n'
-        '`/cvpilot master upload file:<PDF or TeX> label:<label> companion:<optional file>` — Upload a source.\n'
-        '`/cvpilot master edit label:<label> instructions:<change>` — Propose edits.\n'
-        'Labels default to `general`; choose healthcare, sales, arts or any label. Reusing a label replaces its current upload.\n\n'
-        '**Master profile**\n'
-        '`/cvpilot profile show` — View your profile.\n'
-        '`/cvpilot profile sync` — Sync verified facts from masters.\n'
-        '`/cvpilot profile edit instructions:<change>` — Propose a profile update.\n\n'
-        '**History and undo**\n'
-        '`/cvpilot history limit:<1–10>` — List recent main commits.\n'
-        '`/cvpilot revert commit:<ID>` — Undo one commit; requires typing REVERT.\n'
-        '`/cvpilot reset` — Restore the template and delete other branches; requires typing RESET.\n\n'
-        '**Permissions**\n'
-        '`/cvpilot settings master_edit value:<on|off|show>` — Manage master edit permission.\n\n'
-        'Validated changes commit directly to main. Revert adds an undo commit and preserves history. '
-        'Master edits require opt-in and an explicit request. PDF/UTF-8 TeX: 8 MiB each; DOCX unsupported. '
-        'TeX-only uploads compile to PDF; master get returns both files. '
-        'Use companion for a matching PDF/TeX pair. Wait for upload completion before tailoring.'
+        '`/cvpilot master upload file:<PDF or TeX> label:<label> companion:<optional file>`\n'
+        '`/cvpilot master get label:<label>` — Private source attachments.\n'
+        '`/cvpilot master edit label:<label> instructions:<change>`\n'
+        '`/cvpilot master delete label:<label>` or `commit:<ID>` — Delete one source.\n'
+        'Labels default to general; use healthcare, sales or any label. Reusing a label replaces it.\n'
+        'PDF/UTF-8 TeX: 8 MiB each. TeX-only uploads compile to PDF; companion supplies a matching pair. Wait for completion before tailoring.\n\n'
+        '**Profile and history**\n'
+        '`/cvpilot profile show` | `/cvpilot profile sync`\n'
+        '`/cvpilot profile edit instructions:<facts>`\n'
+        '`/cvpilot history limit:<1–10>` — Main commits.\n'
+        '`/cvpilot revert commit:<ID>` — Undo one commit; type REVERT.\n'
+        '`/cvpilot reset` — Restore template and delete other branches; type RESET.\n'
+        '`/cvpilot settings master_edit value:<on|off|show>` — Opt in to requested master edits.\n\n'
+        'Deletions require a preview and typing DELETE. Files leave main and CVPilot downloads; Git history and sent attachments remain. Profile facts are kept. Changes commit to main; revert can restore deletions.'
     )
     await private_reply(interaction,help_text)
 
@@ -209,6 +205,11 @@ class ResetModal(discord.ui.Modal, title='Confirm repository reset'):
 
 class RevertModal(ResetModal, title='Confirm commit revert'):
     verification=discord.ui.TextInput(label='Type REVERT to undo this commit',placeholder='REVERT',
+                                      min_length=6,max_length=6,required=True)
+
+
+class DeleteModal(ResetModal, title='Confirm resume deletion'):
+    verification=discord.ui.TextInput(label='Type DELETE to delete this resume',placeholder='DELETE',
                                       min_length=6,max_length=6,required=True)
 
 
@@ -270,6 +271,20 @@ class RevertView(ResetView):
         await interaction.response.send_modal(self.modal_type(self))
 
 
+class MasterDeleteView(ResetView):
+    action='master-delete'
+    modal_type=DeleteModal
+
+    @discord.ui.button(label='Delete resume',style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await self.interaction_check(interaction):return
+        await interaction.response.send_modal(self.modal_type(self))
+
+
+class ApplicationDeleteView(MasterDeleteView):
+    action='application-delete'
+
+
 async def prepare_repository_change(interaction, action, view_type, **args):
     if not await public_authorized(interaction):return
     await defer_private(interaction)
@@ -322,6 +337,21 @@ async def download(interaction: discord.Interaction, job_id: int | None = None):
     await invoke(interaction,'download',job_id=job_id)
 
 master = app_commands.Group(name='master', description='Upload, download, or revise source resumes for any field', parent=cvpilot)
+
+@master.command(name='delete', description='Delete one master source resume after reviewing and confirming')
+@app_commands.describe(label='Resume label to delete; supply either label or commit',
+                       commit='Commit ID identifying one master resume; at least 7 characters')
+async def master_delete(interaction: discord.Interaction, label: str | None = None, commit: str | None = None):
+    await prepare_repository_change(interaction,'master-delete',MasterDeleteView,label=label,commit=commit)
+
+
+application = app_commands.Group(name='application', description='Manage saved tailored application resumes', parent=cvpilot)
+
+@application.command(name='delete', description='Delete one tailored application resume after reviewing and confirming')
+@app_commands.describe(link='CVPilot GitHub result/file/folder link or original posting URL; supply link or commit',
+                       commit='Commit ID identifying one tailored application; at least 7 characters')
+async def application_delete(interaction: discord.Interaction, link: str | None = None, commit: str | None = None):
+    await prepare_repository_change(interaction,'application-delete',ApplicationDeleteView,link=link,commit=commit)
 
 @master.command(name='get', description='Download your saved source resume as private attachments')
 @app_commands.describe(label='Any resume label, such as general, teaching, healthcare, or sales')
@@ -489,13 +519,13 @@ if __name__ == '__main__':
     if '--check' in sys.argv:
         names = {cmd.qualified_name for cmd in cvpilot.walk_commands()}
         expected = {'cvpilot help', 'cvpilot init', 'cvpilot repo', 'cvpilot status', 'cvpilot tailor', 'cvpilot download', 'cvpilot reset', 'cvpilot history', 'cvpilot revert',
-                    'cvpilot master get', 'cvpilot master edit', 'cvpilot master upload',
+                    'cvpilot master get', 'cvpilot master edit', 'cvpilot master upload', 'cvpilot master delete', 'cvpilot application delete',
                     'cvpilot profile show', 'cvpilot profile sync', 'cvpilot profile edit',
                     'cvpilot settings master_edit'}
         missing = expected - names
         if missing:
             raise SystemExit('Missing native subcommands: ' + ', '.join(sorted(missing)))
-        print('OK: 16 server/DM CVPilot subcommands and 4 server-only admin diagnostics defined')
+        print('OK: 18 server/DM CVPilot subcommands and 4 server-only admin diagnostics defined')
         sys.exit(0)
     if not TOKEN or TOKEN == 'REPLACE_WITH_TOKEN':
         raise SystemExit('Set CVPILOT_DISCORD_TOKEN in ~/.config/cvpilot/controller.env')
