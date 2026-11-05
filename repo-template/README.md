@@ -41,6 +41,10 @@ bot does not combine files from different versions.
 
 Successful uploads, resume edits, tailored applications and profile changes
 commit directly to `main` after validation. CVPilot creates no per-job branches.
+New commit titles identify the operation, master label or application, and
+resume formats when relevant. Each commit body lists the exact added, updated
+and deleted files. Revert titles keep the original commit ID and explain the
+inverse change; their bodies also include the original commit title and full ID.
 Each job links to its exact commit; saved downloads continue to retrieve the
 files from that commit even after later edits, unless the resume is explicitly
 deleted using a delete command below. Unchanged jobs create no extra

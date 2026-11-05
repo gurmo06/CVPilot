@@ -1,6 +1,7 @@
 """Publish validated jobs to main without branches, history rewrites, or duplicate retries."""
 import json
 import re
+import commit_messages
 
 OID=re.compile(r'(?:[a-f0-9]{40}|[a-f0-9]{64})\Z')
 
@@ -59,15 +60,25 @@ def publish(w, job, store, draft=None):
         w._write_intent(journal_path(w,job),record)
     if 'result' not in record:
         head=w.run_git(uid,trusted,'rev-parse','HEAD')
-        message=f'CVPilot {job["kind"]} job {jid}'
-        if job['kind']=='revert':message=f'CVPilot revert {record["draft"]["reverted_commit"][:12]} job {jid}'
         if head==record['base']:
             if w.run_git(uid,trusted,'diff','--cached','--name-only'):
-                w.run_git(uid,trusted,'commit','-m',message)
+                if 'commit_message' not in record:
+                    record['commit_message']=commit_messages.build(w,uid,trusted,job['kind'],jid,
+                        json.loads(job['payload']),record['draft'])
+                    # Recovery checks the exact persisted message after a crash;
+                    # it never regenerates metadata from a different snapshot.
+                    w._write_intent(journal_path(w,job),record)
+                commit_messages.commit(w,uid,trusted,record['commit_message'])
                 head=w.run_git(uid,trusted,'rev-parse','HEAD')
         else:
             parents=w.run_git(uid,trusted,'rev-list','--parents','-n','1',head).split()
-            if parents!=[head,record['base']] or w.run_git(uid,trusted,'show','-s','--format=%s',head)!=message:
+            message=record.get('commit_message')
+            if message is None:
+                # Journals made before detailed messages may have committed
+                # successfully before recording their result. Preserve recovery.
+                message=f'CVPilot {job["kind"]} job {jid}'
+                if job['kind']=='revert':message=f'CVPilot revert {record["draft"]["reverted_commit"][:12]} job {jid}'
+            if parents!=[head,record['base']] or w.run_git(uid,trusted,'show','-s','--format=%B',head)!=message:
                 raise ValueError('Interrupted job checkout changed; refusing main publication')
         if not OID.fullmatch(head):raise ValueError('Invalid publication commit')
         changed=head!=record['base']

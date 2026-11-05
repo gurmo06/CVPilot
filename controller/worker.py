@@ -540,7 +540,9 @@ def repo_init(job,store):
     run_git(uid,repo,'config','user.email','cvpilot@users.noreply.github.com')
     run_git(uid,repo,'add','-A')
     if run_git(uid,repo,'status','--porcelain'):
-        run_git(uid,repo,'commit','-m','Initialize CVPilot workspace')
+        from commit_messages import build,commit
+        import sys
+        commit(sys.modules[__name__],uid,repo,build(sys.modules[__name__],uid,repo,'init',job['id']))
         run_git(uid,repo,'push','origin','main')
     protection='enabled'
     protection_error=None

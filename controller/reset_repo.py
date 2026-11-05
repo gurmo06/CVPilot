@@ -64,7 +64,9 @@ def template_commit(w, uid, repo, old_main, folder, jid):
             shutil.copy2(source,destination);count+=1
     if not count:raise ValueError('Initial repository template is empty')
     w.run_git(uid,folder,'add','-f','-A','--','.')
-    w.run_git(uid,folder,'commit','--allow-empty','-m',f'CVPilot reset to initial template (job {jid})')
+    from commit_messages import build,commit
+    message=build(w,uid,folder,'reset',jid)
+    commit(w,uid,folder,message,allow_empty=True)
     return w.run_git(uid,folder,'rev-parse','HEAD')
 
 
