@@ -77,6 +77,15 @@ class ProfileSyncTests(unittest.TestCase):
         self.assertEqual(self.fixture.git('-C',str(self.fixture.remote),'rev-parse','main'),before)
         self.assertNotIn('draft',json.loads((worker.ROOT/'publications'/UID/f'{job["id"]}.json').read_text()))
 
+    def test_extra_brace_does_not_bypass_source_validation_or_publish_incomplete_evidence(self):
+        job=self.job();before=self.fixture.git('-C',str(self.fixture.remote),'rev-parse','main')
+        value={'status':'updated','profile_markdown':'# Profile\nVerified teaching experience',
+               'profile_sources':{'schema_version':1,'facts':{},'source_manifest':{}}}
+        raw=json.dumps({'status':'ok','result':{'payloads':[{'text':json.dumps(value)+'}'}]}})
+        with self.assertRaisesRegex(ValueError,'did not review all current resumes'):self.execute(job,raw=raw)
+        self.assertEqual(self.fixture.git('-C',str(self.fixture.remote),'rev-parse','main'),before)
+        self.assertNotIn('draft',json.loads((worker.ROOT/'publications'/UID/f'{job["id"]}.json').read_text()))
+
     def test_stale_manifest_missing_facts_and_false_confirmation_are_rejected(self):
         for case in ('manifest','facts','confirmation','source_ref'):
             with self.subTest(case=case):
@@ -193,6 +202,25 @@ class ProfileJsonEscapeTests(unittest.TestCase):
     def test_tex_command_starting_with_u_is_preserved_when_not_a_unicode_escape(self):
         md,_=self.apply(r'{"status":"updated","profile_markdown":"Use \unknownmacro safely","profile_sources":{}}')
         self.assertEqual(md,r'Use \unknownmacro safely')
+
+    def test_one_extra_closing_root_brace_preserves_the_complete_profile(self):
+        value={'status':'updated','profile_markdown':'Verified facts with {literal braces}.',
+               'profile_sources':{'facts':{'experience':{'text':'Verified experience'}}}}
+        md,sources=self.apply(json.dumps(value)+'}\n')
+        self.assertEqual(md,value['profile_markdown']);self.assertEqual(sources,value['profile_sources'])
+
+    def test_extra_brace_and_literal_markdown_escape_can_be_normalized_together(self):
+        md,_=self.apply(r'{"status":"updated","profile_markdown":"Use F\* safely","profile_sources":{}}}')
+        self.assertEqual(md,r'Use F\* safely')
+
+    def test_brace_normalization_rejects_other_trailing_content_and_incomplete_objects(self):
+        complete=json.dumps({'status':'updated','profile_markdown':'Verified facts','profile_sources':{}})
+        cases=[complete+'}}',complete+']',complete+'\nAnother answer',complete+'{}',
+               complete+'},',complete[:-1],complete[:-2]+'}',
+               '"a string"}', '[1,2]}',complete[:-1]+',}']
+        for text in cases:
+            with self.subTest(text=text),self.assertRaisesRegex(ValueError,'incomplete or invalid JSON|structured profile'):
+                self.apply(text)
 
     def test_truncated_or_other_malformed_json_is_still_rejected(self):
         for text in (r'{"status":"updated","profile_markdown":"F\*"',

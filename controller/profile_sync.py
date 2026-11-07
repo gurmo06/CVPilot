@@ -39,13 +39,25 @@ def prepare(task, base, extract_pdf=None):
     return manifest
 
 
+def complete_json(text):
+    try:return json.loads(text)
+    except json.JSONDecodeError as exc:
+        if exc.msg=='Extra data':
+            value,end=json.JSONDecoder().raw_decode(text)
+            # Accept exactly one surplus closing root brace after an already
+            # complete object. Never fill missing syntax, join objects, or keep
+            # a prefix of a truncated response. Full profile validation follows.
+            if isinstance(value,dict) and text[end:].strip()=='}':return value
+        raise
+
+
 def apply_response(task, report):
     text='\n'.join(item.get('text','') for item in report.get('payloads',[]) if isinstance(item,dict))
     if not text:text=report.get('final','')
     text=text.strip()
     if text.startswith('```') and text.endswith('```'):
         text='\n'.join(text.splitlines()[1:-1])
-    try:value=json.loads(text)
+    try:value=complete_json(text)
     except json.JSONDecodeError as exc:
         # Models sometimes use Markdown/TeX escapes such as \* or \_ inside
         # JSON strings. Preserve those literal backslashes; never guess missing
@@ -54,7 +66,7 @@ def apply_response(task, report):
             raise ValueError('Profile sync returned incomplete or invalid JSON. No changes were published.') from exc
         escaped=re.sub(r'\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4})|\\',
                        lambda match:match[0] if len(match[0])>1 else '\\\\',text)
-        try:value=json.loads(escaped)
+        try:value=complete_json(escaped)
         except json.JSONDecodeError as failed:
             raise ValueError('Profile sync returned incomplete or invalid JSON. No changes were published.') from failed
     if not isinstance(value,dict):raise ValueError('Invalid structured profile response; no changes were published.')
