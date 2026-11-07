@@ -26,6 +26,14 @@ are not supported. Operator diagnostics stay restricted to the server.
 5. Retrieve sources with `/cvpilot master get label:<label>` and inspect progress
    with `/cvpilot status`.
 
+Each request keeps its permanent job ID (for example, `#20`) and also shows
+its current position among all pending CVPilot jobs, the number ahead of it,
+and total running/waiting work. Running jobs count ahead of waiting jobs;
+finished and failed jobs are excluded. Queue positions are shared across users,
+but only aggregate counts are shown for other users. `/cvpilot status` refreshes
+these positions and prioritizes your active jobs. Earlier confirmation messages
+show the queue snapshot at the time they were sent. No duration estimate is implied.
+
 There is no fixed list of career categories. Labels are user-defined lowercase
 names (letters, numbers, hyphens; start with a letter; up to 40 characters).
 Reusing a label explicitly replaces its active uploaded version; earlier

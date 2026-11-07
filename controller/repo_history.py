@@ -6,6 +6,7 @@ import secrets
 import threading
 import time
 import main_commits
+from queue_status import acknowledgement
 from reset_repo import repository_identity, verified_origin
 
 CONFIRMATIONS={}
@@ -91,7 +92,7 @@ def request(uid, args, user, store):
         if time.monotonic()>=pending['expires']:raise ValueError('Revert confirmation expired. Run /cvpilot revert again.')
         jid=store.enqueue(uid,'revert',{key:pending[key] for key in ('repo','repo_id','head','commit')}|{'confirmed':True})
         del CONFIRMATIONS[uid]
-        return {'text':f'Revert queued as job #{jid}. Check /cvpilot status.'}
+        return acknowledgement(store,uid,jid,f'Revert queued as job #{jid}. Check /cvpilot status.')
 
 
 def revert_commit(job, store):

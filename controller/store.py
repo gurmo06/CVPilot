@@ -77,6 +77,35 @@ class Store:
             xs=c.execute('SELECT id,kind,state,result,error,created_at FROM jobs WHERE discord_id=? ORDER BY id DESC LIMIT 8',(uid,)).fetchall()
         return [dict(x) for x in xs]
 
+    def queue_snapshot(self, uid, jid=None):
+        """One read snapshot: global counts/ranks, but only this user's job details.
+
+        Running work comes first, then waiting jobs in FIFO ID order. Completed
+        and failed jobs never occupy a queue position. No scheduling is changed.
+        """
+        if jid is not None and (type(jid) is not int or jid<1):
+            raise ValueError('Invalid job ID')
+        with closing(self.connection()) as c:
+            c.execute('BEGIN')
+            counts=c.execute("""SELECT COUNT(*) AS total,
+                COALESCE(SUM(state='running'),0) AS running,
+                COALESCE(SUM(state='queued'),0) AS waiting
+                FROM jobs WHERE state IN ('queued','running')""").fetchone()
+            own_pending=c.execute("SELECT COUNT(*) FROM jobs WHERE discord_id=? AND state IN ('queued','running')",(uid,)).fetchone()[0]
+            selection='AND j.id=?' if jid is not None else '''ORDER BY
+                CASE j.state WHEN 'running' THEN 0 WHEN 'queued' THEN 1 ELSE 2 END,
+                CASE WHEN j.state IN ('queued','running') THEN j.id ELSE -j.id END
+                LIMIT 8'''
+            rows=c.execute(f"""WITH active AS (
+                SELECT id, ROW_NUMBER() OVER (
+                    ORDER BY CASE state WHEN 'running' THEN 0 ELSE 1 END, id
+                ) AS position FROM jobs WHERE state IN ('queued','running')
+            ) SELECT j.id,j.kind,j.state,j.result,j.error,j.created_at,a.position
+              FROM jobs j LEFT JOIN active a ON a.id=j.id
+              WHERE j.discord_id=? {selection}""",(uid,jid) if jid is not None else (uid,)).fetchall()
+        if jid is not None and not rows:raise ValueError('No job found for your account and that job ID.')
+        return {**dict(counts),'own_pending':own_pending,'jobs':[dict(row) for row in rows]}
+
     def latest_uploads(self, uid):
         import json
         with closing(self.connection()) as c:

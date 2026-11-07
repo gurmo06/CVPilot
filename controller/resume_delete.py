@@ -10,6 +10,7 @@ from urllib.parse import urlsplit, unquote
 import main_commits
 from resumes import label
 from repo_history import checked_repo
+from queue_status import acknowledgement
 
 CONFIRMATIONS = {}
 LOCK = threading.Lock()
@@ -176,7 +177,7 @@ def request(uid, args, user, store, kind):
         payload = {key: pending[key] for key in ('repo', 'repo_id', 'head', 'directory', 'files')}
         jid = store.enqueue(uid, kind, payload | {'confirmed': True})
         del CONFIRMATIONS[key]
-        return {'text': f'Resume deletion queued as job #{jid}. Check /cvpilot status.'}
+        return acknowledgement(store,uid,jid,f'Resume deletion queued as job #{jid}. Check /cvpilot status.')
 
 
 def delete_resume(job, store):
