@@ -70,6 +70,22 @@ class ProfileSyncTests(unittest.TestCase):
         self.assertTrue(same['url'].endswith('/tree/main'))
         self.assertIn('No new commit was created',same['note'])
 
+    def test_unchanged_sync_cleans_existing_typography_with_only_a_markdown_commit(self):
+        first=self.job();result=self.execute(first,self.write_profile);self.finish(first,result)
+        seed=self.fixture.seed;git=self.fixture.git
+        git('-C',str(seed),'pull','--ff-only','origin','main')
+        markdown=seed/'profile/MASTER_PROFILE.md';markdown.write_text(r'# Profile'+ '\n\n'+r'Verified\u00a0teaching: self\u2011directed work\u2013study.'+'\n')
+        git('-C',str(seed),'add','profile/MASTER_PROFILE.md');git('-C',str(seed),'commit','-m','Seed legacy escaped typography')
+        git('-C',str(seed),'push','origin','main')
+        before=git('-C',str(self.fixture.remote),'rev-parse','main')
+        sources=git('-C',str(self.fixture.remote),'show','main:profile/profile_sources.json')
+        second=self.job();clean=self.execute(second);self.finish(second,clean)
+        self.assertTrue(clean['changed']);self.assertNotEqual(clean['commit'],before)
+        text=git('-C',str(self.fixture.remote),'show','main:profile/MASTER_PROFILE.md')
+        self.assertNotIn(r'\u00a0',text);self.assertIn('Verified\u00a0teaching',text)
+        self.assertEqual(git('-C',str(self.fixture.remote),'show','main:profile/profile_sources.json'),sources)
+        self.assertEqual(git('-C',str(self.fixture.remote),'diff','--name-only',before,clean['commit']),'profile/MASTER_PROFILE.md')
+
     def test_refusal_or_false_done_without_output_cannot_be_a_successful_noop(self):
         job=self.job();before=self.fixture.git('-C',str(self.fixture.remote),'rev-parse','main')
         refused=json.dumps({'status':'ok','result':{'payloads':[{'text':'I cannot access the source files; please send them again.'}]}})
@@ -202,6 +218,43 @@ class ProfileJsonEscapeTests(unittest.TestCase):
     def test_tex_command_starting_with_u_is_preserved_when_not_a_unicode_escape(self):
         md,_=self.apply(r'{"status":"updated","profile_markdown":"Use \unknownmacro safely","profile_sources":{}}')
         self.assertEqual(md,r'Use \unknownmacro safely')
+
+    def test_double_encoded_typography_becomes_utf8_without_modifying_source_metadata(self):
+        markdown=r'Aug\u00a02024, self\u2011directed work\u2013study and co\u2010author.'
+        sources={'facts':{'example':{'text':r'Keep metadata \u2011 literal','sources':[{'path':r'keep\u00a0path'}]}}}
+        md,actual=self.apply(json.dumps({'status':'updated','profile_markdown':markdown,'profile_sources':sources}))
+        self.assertEqual(md,'Aug\u00a02024, self\u2011directed work\u2013study and co\u2010author.')
+        self.assertEqual(actual,sources)
+
+    def test_unicode_cleanup_preserves_real_unicode_tex_other_escapes_and_code(self):
+        text='Résumé α and real\u2011hyphen '+r'\unknownmacro \n \u00e9 \\u00a0 `\u00a0`'+ '\n'+r'```json'+ '\n'+r'"\u2011"'+ '\n```\n'+r'~~~text'+ '\n'+r'\u2013'+ '\n~~~'
+        self.assertEqual(profile_sync.readable_typography(text),text)
+
+    def test_typography_cleanup_is_idempotent_and_leaves_nonmatching_words_unchanged(self):
+        text=r'Aug\u00A02024 and self\u2011directed work.'
+        clean=profile_sync.readable_typography(text)
+        self.assertEqual(clean,'Aug\u00a02024 and self\u2011directed work.')
+        self.assertEqual(profile_sync.readable_typography(clean),clean)
+
+    def test_unchanged_response_does_not_normalize_user_confirmed_facts_or_source_records(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as folder:
+            task=Path(folder);path=task/'profile';path.mkdir()
+            (path/'MASTER_PROFILE.md').write_text(r'# Profile: self\u2011directed')
+            original=json.dumps({'facts':{'confirmed':{'text':r'User literal \u2011','user_confirmed':True}}},indent=4)
+            (path/'profile_sources.json').write_text(original)
+            profile_sync.apply_response(task,{'payloads':[{'text':'{"status":"unchanged"}'}]})
+            self.assertEqual((path/'MASTER_PROFILE.md').read_text(),'# Profile: self\u2011directed')
+            self.assertEqual((path/'profile_sources.json').read_text(),original)
+
+    def test_typography_cleanup_rejects_symlink_output_in_unchanged_response(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as folder:
+            task=Path(folder);(task/'profile').mkdir();outside=task/'outside.md';outside.write_text(r'Keep\u00a0literal')
+            (task/'profile/MASTER_PROFILE.md').symlink_to(outside)
+            with self.assertRaisesRegex(ValueError,'Unsafe profile'):
+                profile_sync.apply_response(task,{'payloads':[{'text':'{"status":"unchanged"}'}]})
+            self.assertEqual(outside.read_text(),r'Keep\u00a0literal')
 
     def test_one_extra_closing_root_brace_preserves_the_complete_profile(self):
         value={'status':'updated','profile_markdown':'Verified facts with {literal braces}.',

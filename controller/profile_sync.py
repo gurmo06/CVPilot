@@ -51,6 +51,23 @@ def complete_json(text):
         raise
 
 
+def readable_typography(text):
+    # Fix observed double-encoded typography only, without re-decoding JSON,
+    # TeX commands, other Unicode, or literal examples inside Markdown code.
+    pattern=r'(?P<code>```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]*`)|(?<!\\)\\u(?P<point>00[aA]0|201[013])'
+    return re.sub(pattern,lambda match:match[0] if match['code'] is not None else chr(int(match['point'],16)),text)
+
+
+def clean_profile_typography(task):
+    path=task/'profile/MASTER_PROFILE.md'
+    if path.parent.is_symlink() or path.is_symlink():raise ValueError('Unsafe profile output path')
+    if not path.is_file():return False
+    original=path.read_text(encoding='utf-8');clean=readable_typography(original)
+    if clean==original:return False
+    path.write_text(clean,encoding='utf-8')
+    return True
+
+
 def apply_response(task, report):
     text='\n'.join(item.get('text','') for item in report.get('payloads',[]) if isinstance(item,dict))
     if not text:text=report.get('final','')
@@ -71,7 +88,9 @@ def apply_response(task, report):
             raise ValueError('Profile sync returned incomplete or invalid JSON. No changes were published.') from failed
     if not isinstance(value,dict):raise ValueError('Invalid structured profile response; no changes were published.')
     if value.get('status')=='blocked':raise ValueError('Profile sync was blocked: '+str(value.get('reason','source extraction failed'))[:500])
-    if value.get('status')=='unchanged':return
+    if value.get('status')=='unchanged':
+        clean_profile_typography(task)
+        return
     if (value.get('status')!='updated' or not isinstance(value.get('profile_markdown'),str)
             or not isinstance(value.get('profile_sources'),dict)):
         raise ValueError('Profile sync omitted its output files; no changes were published.')
@@ -80,7 +99,7 @@ def apply_response(task, report):
     directory=task/'profile';directory.mkdir(exist_ok=True)
     for path in (directory,directory/'MASTER_PROFILE.md',directory/'profile_sources.json'):
         if path.is_symlink():raise ValueError('Unsafe profile output path')
-    (directory/'MASTER_PROFILE.md').write_text(value['profile_markdown'])
+    (directory/'MASTER_PROFILE.md').write_text(readable_typography(value['profile_markdown']),encoding='utf-8')
     (directory/'profile_sources.json').write_text(json.dumps(value['profile_sources'],ensure_ascii=False,indent=2)+'\n')
 
 
