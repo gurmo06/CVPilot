@@ -3,7 +3,7 @@ name: career-resume
 description: Accurate TeX resume editing for any profession for CVPilot queued jobs
 user-invocable: true
 ---
-Read the exact job posting with web_fetch; read master resumes and profile. Wording may be improved but claims must be supported. If a desired tool/skill is unconfirmed, OMIT it and note the question for the user in `notes.md`. Edit only the task worktree path provided in the trusted CVPilot job instructions. Preserve TeX styling, produce `resume.tex` in requested application directory. Do not run Git and do not publish; worker compiles `resume.pdf`, checks one page, and commits validated changes directly to main.
+Use the exact posting data supplied by the trusted worker when present; otherwise read the exact job posting with web_fetch. Do not refetch or search for a posting whose full text has already been supplied. Read master resumes and profile. Wording may be improved but claims must be supported. If a desired tool/skill is unconfirmed, OMIT it and note the question for the user in `notes.md`. Edit only the task worktree path provided in the trusted CVPilot job instructions. Preserve TeX styling, produce `resume.tex` in requested application directory. Do not run Git and do not publish; worker compiles `resume.pdf`, checks one page, and commits validated changes directly to main.
 
 Resume labels are user-defined and default to `general`; they are not a fixed
 set of professions. Adapt to the real industry and job, including nontechnical
