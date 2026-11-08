@@ -11,3 +11,8 @@ careers. Consider relevant qualifications, practical experience, licenses,
 certifications, creative work, research and volunteering as supported by sources.
 PDF-only inputs can use a clean new TeX layout; never claim exact reproduction
 of their formatting. Discord attachments are handled by the trusted controller.
+
+Write raw TeX with actual line breaks, not literal JSON escape sequences. Close
+macro bodies before percent comments. Escape text ampersands; use unescaped
+ampersands only for table alignment. The controller may retry compilation once
+after narrowly correcting generated syntax; validation still requires one page.

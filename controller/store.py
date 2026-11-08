@@ -119,6 +119,39 @@ class Store:
                 if row['kind']=='master-upload':uploads[name]=result
         return uploads
 
+    def status_snapshot(self, uid, jid=None, direction=None):
+        """One owned job and ID-based neighbours, from one queue snapshot."""
+        if jid is not None and (type(jid) is not int or jid<1):
+            raise ValueError('Invalid job ID')
+        if direction not in (None,'older','newer') or (direction and jid is None):
+            raise ValueError('Invalid status navigation')
+        with closing(self.connection()) as c:
+            c.execute('BEGIN')
+            if jid is not None:
+                if not c.execute('SELECT 1 FROM jobs WHERE discord_id=? AND id=?',(uid,jid)).fetchone():
+                    raise ValueError('No job found for your account and that job ID.')
+                if direction:
+                    comparison,order=('<','DESC') if direction=='older' else ('>','ASC')
+                    neighbour=c.execute(f'SELECT id FROM jobs WHERE discord_id=? AND id{comparison}? ORDER BY id {order} LIMIT 1',(uid,jid)).fetchone()
+                    if neighbour:jid=neighbour[0]
+            else:
+                latest=c.execute('SELECT MAX(id) FROM jobs WHERE discord_id=?',(uid,)).fetchone()
+                jid=latest[0]
+            counts=dict(c.execute("""SELECT COUNT(*) AS total,
+                COALESCE(SUM(state='running'),0) AS running,
+                COALESCE(SUM(state='queued'),0) AS waiting
+                FROM jobs WHERE state IN ('queued','running')""").fetchone())
+            job=c.execute("""WITH active AS (
+                SELECT id,ROW_NUMBER() OVER (ORDER BY CASE state WHEN 'running' THEN 0 ELSE 1 END,id) AS position
+                FROM jobs WHERE state IN ('queued','running')
+            ) SELECT j.*,a.position FROM jobs j LEFT JOIN active a ON a.id=j.id
+              WHERE j.discord_id=? AND j.id=?""",(uid,jid)).fetchone()
+            history=c.execute('''SELECT COUNT(*) AS count,1+COALESCE(SUM(id>?),0) AS ordinal,
+                MAX(CASE WHEN id<? THEN id END) AS older,
+                MIN(CASE WHEN id>? THEN id END) AS newer FROM jobs WHERE discord_id=?''',(jid,jid,jid,uid)).fetchone()
+            own_pending=c.execute("SELECT COUNT(*) FROM jobs WHERE discord_id=? AND state IN ('queued','running')",(uid,)).fetchone()[0]
+        return {**counts,'own_pending':own_pending,'job':dict(job) if job else None,'history':dict(history)}
+
     def download_jobs(self, uid):
         with closing(self.connection()) as c:
             rows=c.execute("SELECT id,kind,payload,result FROM jobs WHERE discord_id=? AND state='done' AND id>(SELECT COALESCE(MAX(id),0) FROM jobs WHERE discord_id=? AND kind='reset' AND state='done') ORDER BY id DESC",(uid,uid)).fetchall()

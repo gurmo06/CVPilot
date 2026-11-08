@@ -51,7 +51,7 @@ def process(req, store):
     if not isinstance(args,dict): raise ValueError('Invalid arguments')
     user=store.user(uid)
     if action=='status':
-        return status(store,uid)
+        return status(store,uid,args.get('job_id'),args.get('direction'))
     if action=='repo':
         return {'text':f"https://github.com/{user['repo']} (private; requires an accepted invitation)" if user and user.get('repo') else 'Not initialized. Use `/cvpilot init github_username:YOUR_GITHUB_USERNAME`.'}
     if action=='settings':

@@ -155,7 +155,7 @@ async def help_command(interaction: discord.Interaction):
         'Use #cvpilot or DM CVPilot with your current server role.\n\n'
         '`/cvpilot init github_username:<name>` — Create a private repo.\n'
         '`/cvpilot repo` — Repository link.\n'
-        '`/cvpilot status` — Jobs and results.\n\n'
+        '`/cvpilot status [job_id]` — One detailed job; arrows browse history.\n\n'
         '**Applications**\n'
         '`/cvpilot tailor url:<posting>` — One-page PDF/TeX by private DM.\n'
         '`/cvpilot download job_id:<id>` — Private files; omit ID for latest.\n'
@@ -322,9 +322,109 @@ async def init(interaction: discord.Interaction, github_username: str):
 async def repo(interaction: discord.Interaction):
     await invoke(interaction, 'repo')
 
-@cvpilot.command(name='status', description='View your CVPilot job queue and results')
-async def status(interaction: discord.Interaction):
-    await invoke(interaction, 'status')
+def status_message(result):
+    """Keep the full diagnostic text in an attachment, outside embed limits."""
+    detail=result['status_detail']
+    colors={'failed':0xe74c3c,'done':0x2ecc71,'running':0x3498db,'queued':0xf1c40f}
+    embed=discord.Embed(title=detail['title'],description=detail['description'],
+                        color=colors.get(detail['state'],0x5865f2))
+    for field in detail['fields']:
+        embed.add_field(name=field['name'],value=field['value'],inline=False)
+    embed.set_footer(text='Arrows browse your jobs. Refresh updates this job. Full details are attached. Buttons expire after 10 minutes; run /cvpilot status again.')
+    file=discord.File(io.BytesIO(detail['report'].encode('utf-8')),
+                      filename=f'cvpilot-job-{result["status_view"]["job_id"]}-status.txt')
+    return embed,file
+
+
+class StatusView(discord.ui.View):
+    def __init__(self,sender_id,result):
+        super().__init__(timeout=600)
+        self.sender_id=sender_id;self.message=None;self.lock=asyncio.Lock()
+        self.update_cursor(result)
+
+    def update_cursor(self,result):
+        page=result['status_view'];self.job_id=page['job_id']
+        self.older.disabled=page['older'] is None
+        self.newer.disabled=page['newer'] is None
+
+    async def interaction_check(self,interaction):
+        if interaction.user.id!=self.sender_id:
+            await private_reply(interaction,'Only the user who opened this status view can browse it.')
+            return False
+        return True
+
+    async def show(self,interaction,direction=None):
+        if not await self.interaction_check(interaction):return
+        # Acknowledge first: current membership checks in DMs may take seconds.
+        if not interaction.response.is_done():await interaction.response.defer()
+        if not await public_authorized(interaction):return
+        async with self.lock:
+            if self.is_finished():
+                await private_reply(interaction,'This status view expired. Run /cvpilot status again.')
+                return
+            args={'job_id':self.job_id}
+            if direction:args['direction']=direction
+            try:
+                result=await request_controller(interaction.user.id,'status',args)
+                if not result.get('ok') or not result.get('status_detail'):
+                    await private_reply(interaction,str(result.get('text','Status is unavailable. Run /cvpilot status again.')))
+                    return
+                embed,file=status_message(result)
+                previous_id=self.job_id
+                previous_disabled=[item.disabled for item in self.children]
+                self.update_cursor(result)
+                try:
+                    await interaction.edit_original_response(content=None,embed=embed,attachments=[file],view=self,
+                        allowed_mentions=discord.AllowedMentions.none())
+                except Exception:
+                    self.job_id=previous_id
+                    for item,disabled in zip(self.children,previous_disabled):item.disabled=disabled
+                    raise
+                finally:file.close()
+            except (OSError,TimeoutError,RuntimeError,ValueError,discord.HTTPException) as exc:
+                print(f'[cvpilot] status navigation error: {type(exc).__name__}: {exc}',flush=True)
+                await private_reply(interaction,'Could not refresh this status. The displayed job has not changed. Try Refresh or run /cvpilot status again.')
+
+    @discord.ui.button(label='Older',emoji='⬅️',style=discord.ButtonStyle.secondary)
+    async def older(self,interaction:discord.Interaction,button:discord.ui.Button):
+        await self.show(interaction,'older')
+
+    @discord.ui.button(label='Refresh',emoji='🔄',style=discord.ButtonStyle.primary)
+    async def refresh(self,interaction:discord.Interaction,button:discord.ui.Button):
+        await self.show(interaction)
+
+    @discord.ui.button(label='Newer',emoji='➡️',style=discord.ButtonStyle.secondary)
+    async def newer(self,interaction:discord.Interaction,button:discord.ui.Button):
+        await self.show(interaction,'newer')
+
+    async def on_timeout(self):
+        async with self.lock:
+            for item in self.children:item.disabled=True
+            self.stop()
+            if self.message is not None:
+                try:await self.message.edit(view=self)
+                except discord.HTTPException:pass
+
+
+@cvpilot.command(name='status', description='View one detailed job with errors, timing, and history arrows')
+@app_commands.describe(job_id='Your job ID; omit to show your latest job')
+async def status(interaction: discord.Interaction, job_id: int | None = None):
+    if not await public_authorized(interaction):return
+    await defer_private(interaction)
+    try:
+        result=await request_controller(interaction.user.id,'status',{'job_id':job_id})
+        if not result.get('ok') or not result.get('status_detail'):
+            await send_controller_response(interaction,result)
+            return
+        view=StatusView(interaction.user.id,result)
+        embed,file=status_message(result)
+        try:
+            view.message=await interaction.followup.send(embed=embed,file=file,view=view,ephemeral=True,wait=True,
+                allowed_mentions=discord.AllowedMentions.none())
+        finally:file.close()
+    except (OSError,TimeoutError,RuntimeError,ValueError,discord.HTTPException) as exc:
+        print(f'[cvpilot] status error: {type(exc).__name__}: {exc}',flush=True)
+        await private_reply(interaction,'Could not load job status. Try /cvpilot status again shortly.')
 
 @cvpilot.command(name='tailor', description='Tailor a one-page resume from an HTTPS job posting URL')
 @app_commands.describe(url='Full HTTPS URL for the job posting')

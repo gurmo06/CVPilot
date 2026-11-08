@@ -131,7 +131,7 @@ class AuthorizationTests(unittest.IsolatedAsyncioTestCase):
         with mock.patch.object(listener,'request_controller',new=mock.AsyncMock(return_value={'ok':True,'text':'No jobs yet.'})) as controller:
             await listener.status.callback(self.interaction)
         self.interaction.response.defer.assert_awaited_once()
-        controller.assert_awaited_once_with(UID,'status',{})
+        controller.assert_awaited_once_with(UID,'status',{'job_id':None})
         self.interaction.followup.send.assert_awaited_once()
         self.assertTrue(self.interaction.followup.send.call_args.kwargs['ephemeral'])
 

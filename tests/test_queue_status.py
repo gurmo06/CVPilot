@@ -51,7 +51,7 @@ class QueueStatusTests(unittest.TestCase):
         self.assertEqual(self.store.claim()['id'],second);self.store.finish(second,'done',{})
         self.assertEqual(self.store.queue_snapshot(UID,mine)['jobs'][0]['position'],1)
         self.assertEqual(self.store.claim()['id'],mine)
-        response=self.call('status');self.assertIn(f'#{mine} profile-sync: running — Running now.',response['text'])
+        response=self.call('status');self.assertIn(f'#{mine} — profile-sync: running',response['text']);self.assertIn('Running now.',response['text'])
         self.assertNotRegex(response['text'],r'Queue position [0-9]')
         self.store.finish(mine,'done',{})
         self.assertEqual(self.store.queue_snapshot(UID,mine)['jobs'][0]['position'],None)
@@ -70,7 +70,7 @@ class QueueStatusTests(unittest.TestCase):
         self.store.enqueue(OTHER,'tailor',{})
         own=self.store.enqueue(UID,'profile-sync',{})
         response=self.call('status');text=json.dumps(response)
-        self.assertIn('2 pending',text);self.assertIn(f'#{own} profile-sync: queued',text)
+        self.assertIn('2 pending',text);self.assertIn(f'#{own}',text);self.assertIn('profile-sync: queued',text)
         for secret in ('other-private','private-result','PRIVATE OTHER ERROR',OTHER):self.assertNotIn(secret,text)
         with self.assertRaisesRegex(ValueError,'your account'):self.store.queue_snapshot(UID,foreign)
 
@@ -80,38 +80,45 @@ class QueueStatusTests(unittest.TestCase):
         self.assertIn('No jobs yet.',response['text']);self.assertIn('1 waiting (1 pending)',response['text'])
         self.assertNotIn('tailor',response['text']);self.assertNotIn('#1',response['text'])
 
-    def test_active_jobs_are_shown_even_when_older_than_recent_history(self):
+    def test_latest_job_is_shown_and_active_load_remains_visible(self):
         first=self.store.enqueue(UID,'profile-sync',{})
         for _ in range(12):
             jid=self.store.enqueue(UID,'profile-edit',{});self.store.finish(jid,'done',{})
         response=self.call('status')
-        self.assertIn(f'#{first} profile-sync: queued',response['text'])
-        self.assertLess(response['text'].index(f'#{first} '),response['text'].index(f'#{jid} '))
+        self.assertEqual(response['status_view']['job_id'],jid)
+        self.assertIn('1 waiting',response['text'])
+        self.assertNotIn(f'#{first} ',response['text'])
+        selected=self.call('status',{'job_id':first})
+        self.assertIn('Queue position 1 of 1',selected['text'])
 
-    def test_long_own_queue_shows_earliest_work_and_count_without_discord_truncation(self):
-        for _ in range(15):self.store.enqueue(UID,'profile-sync',{})
+    def test_long_own_queue_shows_one_job_and_load(self):
+        for _ in range(15):jid=self.store.enqueue(UID,'profile-sync',{})
         response=self.call('status')
-        for jid in range(1,9):self.assertIn(f'#{jid} profile-sync: queued',response['text'])
-        self.assertIn('7 more of your jobs are waiting',response['text'])
-        self.assertNotIn('#15 ',response['text']);self.assertLessEqual(len(response['text']),1900)
+        self.assertEqual(response['status_view']['job_id'],jid)
+        self.assertEqual(response['status_view']['count'],15)
+        self.assertEqual(response['status_view']['older'],14)
+        self.assertIsNone(response['status_view']['newer'])
+        self.assertIn('15 waiting',response['text']);self.assertLessEqual(len(response['text']),1900)
 
-    def test_completed_results_and_errors_remain_visible_but_have_no_position(self):
+    def test_completed_result_and_error_can_be_opened_individually(self):
         complete=self.store.enqueue(UID,'profile-sync',{})
         self.store.finish(complete,'done',{'url':'https://github.com/example/repo/commit/abc'})
         failed=self.store.enqueue(UID,'master-edit',{})
         self.store.finish(failed,'failed',error='Compilation failed')
         text=self.call('status')['text']
-        self.assertIn('https://github.com/example/repo/commit/abc',text)
         self.assertIn('Compilation failed',text);self.assertNotRegex(text,r'Queue position [0-9]')
+        older=self.call('status',{'job_id':failed,'direction':'older'})
+        self.assertIn('https://github.com/example/repo/commit/abc',older['text'])
+        self.assertEqual(older['status_view']['job_id'],complete)
 
-    def test_long_history_is_bounded_without_cutting_a_github_link(self):
+    def test_long_link_remains_whole_in_full_report(self):
         url='https://github.com/example/repository/commit/'+'a'*600
         for _ in range(8):
             jid=self.store.enqueue(UID,'tailor',{});self.store.finish(jid,'done',{'url':url})
-        text=self.call('status')['text']
-        self.assertLessEqual(len(text),1900);self.assertIn('More recent jobs omitted',text)
-        for line in text.splitlines():
-            if 'https://' in line:self.assertTrue(line.endswith(url))
+        response=self.call('status')
+        self.assertLessEqual(len(response['text']),1900)
+        self.assertIn(url,response['status_detail']['report'])
+        self.assertEqual(response['status_view']['job_id'],jid)
 
     def test_acknowledgement_handles_worker_start_or_finish_before_response(self):
         jid=self.store.enqueue(UID,'profile-sync',{});self.store.claim()
