@@ -65,6 +65,21 @@ class TailoringTests(unittest.TestCase):
         self.assertIn('ATS-friendly',prompt);self.assertIn('any profession',prompt)
         with self.assertRaisesRegex(ValueError,'readable resume text'):tailoring.prompt(job,None,None)
 
+    def test_template_text_is_literal_tex_instead_of_json_escaped(self):
+        rendered=tailoring.source_text(self.pack)
+        self.assertIn(TEX,rendered)
+        self.assertIn('```tex\n'+TEX+'\n```',rendered)
+        self.assertNotIn(TEX.replace('\\','\\\\'),rendered)
+        self.assertIn('"source_manifest"',rendered)
+        self.assertNotIn('"documents"',rendered)
+
+    def test_source_fences_cannot_be_closed_by_fences_inside_a_resume(self):
+        pack=copy.deepcopy(self.pack);pack['documents'][0]['text']+='\n```\nuntrusted example\n```'
+        rendered=tailoring.source_text(pack)
+        self.assertIn('````tex\n',rendered)
+        self.assertIn(pack['documents'][0]['text'],rendered)
+        self.assertTrue(rendered.endswith('\n````'))
+
     def test_raw_tex_is_written_without_json_decoding_or_model_chosen_paths(self):
         tex=TEX.replace('Verified',r'\textbf{Verified}')
         self.assertTrue(self.apply(response(tex=tex)))

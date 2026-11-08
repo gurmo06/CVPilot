@@ -14,6 +14,34 @@ UID=fixtures.UID
 
 
 class GeneratedTexTests(unittest.TestCase):
+    def test_uniform_double_escaping_restores_commands_symbols_and_row_breaks(self):
+        original='\n'.join([r'\documentclass{article}',r'\begin{document}',
+                            r'\textbf{Teaching}\\[2pt]',r'Results 30\% \& evidence',r'\end{document}'])
+        escaped=original.replace('\\','\\\\')
+        restored=generated_tex.decode_backslashes(escaped)
+        self.assertEqual(restored,original)
+        self.assertEqual(generated_tex.decode_backslashes(restored),original)
+        self.assertIn(r'Teaching}\\[2pt]',restored)
+        self.assertIn(r'30\% \&',restored)
+
+    def test_correct_or_mixed_tex_and_multiple_escape_layers_are_not_guessed(self):
+        original='\n'.join([r'\documentclass{article}',r'\begin{document}',r'Teaching\\[2pt]',r'\end{document}'])
+        mixed=original.replace(r'\documentclass',r'\\documentclass')
+        for source in (original,mixed,original.replace('\\','\\'*4),r'Literal \\command only'):
+            self.assertEqual(generated_tex.decode_backslashes(source),source)
+
+    def test_escape_layer_is_removed_before_first_compile(self):
+        with tempfile.TemporaryDirectory() as directory:
+            task=Path(directory);tex=task/'resume.tex'
+            original=r'\documentclass{article}\begin{document}Teaching\\more\end{document}'
+            tex.write_text(original.replace('\\','\\\\'))
+            def compile_pdf(task,path):
+                self.assertEqual(path.read_text(),original)
+                return path.with_suffix('.pdf')
+            compiler=mock.Mock(side_effect=compile_pdf)
+            generated_tex.compile_generated(compiler,task,tex)
+            compiler.assert_called_once()
+
     def test_commented_macro_closers_and_json_table_symbols_are_repaired(self):
         source='\n'.join([r'\newcommand{\row}[2]{%',
             r'\begin{tabularx}{\textwidth}{X \u003e{\raggedleft}X}',

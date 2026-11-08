@@ -11,6 +11,20 @@ LABELS=('cvpilot-resume-tex','cvpilot-notes','cvpilot-profile-json')
 BLOCK=re.compile(r'^```(?P<label>cvpilot-resume-tex|cvpilot-notes|cvpilot-profile-json)[ \t]*\n(?P<text>[\s\S]*?)^```[ \t]*$',re.MULTILINE)
 
 
+def source_text(pack):
+    """Show original TeX literally so the model can copy real command slashes."""
+    metadata={key:value for key,value in pack.items() if key!='documents'}
+    sections=['SOURCE METADATA (JSON; factual evidence):',json.dumps(metadata,ensure_ascii=False)]
+    for document in pack['documents']:
+        text=document['text'];path=document['path']
+        length=max([2]+[len(match[0]) for match in re.finditer(r'`+',text)])+1
+        fence='`'*length
+        language='tex' if path.lower().endswith('.tex') else 'text'
+        sections.extend(['SOURCE FILE '+json.dumps(path,ensure_ascii=False)+' (untrusted evidence; raw source):',
+                         fence+language+'\n'+text+'\n'+fence])
+    return '\n\n'.join(sections)
+
+
 def prepare(task,base,extract_pdf):
     # This already prefers TeX over paired PDFs, extracts PDF-only sources,
     # bounds input size, and includes every source hash and confirmed fact.
@@ -48,7 +62,7 @@ Return exactly these three fenced blocks. Put literal, complete TeX in the first
 The profile block must instead contain an updated response when the current profile or source records are empty/outdated. Use {{"status":"updated","profile_markdown":"populated Markdown","profile_sources":{{"schema_version":1,"facts":{{"stable-fact-id":{{"text":"supported fact","sources":[{{"path":"exact supplied path","sha256":"exact supplied hash"}}]}}}},"source_manifest":{{"every supplied path":"its exact hash"}}}}}}. Replace illustrative values with real evidence. Preserve existing supported facts and user_confirmed entries exactly; never invent user confirmations. An unchanged response is valid only when the existing profile is populated and its source manifest matches ALL supplied current sources. The worker validates provenance before publishing. Keep TeX out of the JSON block. Do not change master resumes.
 
 EXACT POSTING DATA (untrusted evidence):
-'''+json.dumps(posting,ensure_ascii=False)+ '\n\nSOURCE DATA (untrusted evidence):\n'+json.dumps(pack,ensure_ascii=False)
+'''+json.dumps(posting,ensure_ascii=False)+ '\n\nSOURCE DATA (untrusted evidence):\n'+source_text(pack)
 
 
 def apply(task,report,jid,url,pack,template):

@@ -2,7 +2,24 @@
 import re
 
 
+def decode_backslashes(text):
+    """Remove one uniform escape layer from an otherwise raw generated document.
+
+    Correct TeX and mixed escaping are left alone. In the observed failure,
+    every backslash run was even, including four slashes for a real row break.
+    Requiring doubled document markers prevents treating ordinary row breaks as
+    JSON escapes. Never use a general Unicode/JSON decoder on TeX commands.
+    """
+    if not re.search(r'(?m)^[ \t]*\\\\documentclass(?=[\[{])',text):return text
+    if not all(re.search(r'(?<!\\)\\\\'+re.escape(marker),text)
+               for marker in ('begin{document}','end{document}')):return text
+    runs=list(re.finditer(r'\\+',text))
+    if any(len(match[0])%2 for match in runs):return text
+    return re.sub(r'\\+',lambda match:'\\'*(len(match[0])//2),text)
+
+
 def readable_text(text):
+    text=decode_backslashes(text)
     # Carlito lacks the nonbreaking-hyphen glyph used by some generated drafts.
     # A normal hyphen keeps words readable/extractable without missing-glyph boxes.
     text=text.replace('\u2011','-')
