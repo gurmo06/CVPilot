@@ -83,6 +83,7 @@ def commit_directory(uid, repo, oid, kind):
 def link_target(uid, repo, user, value, store):
     if not isinstance(value, str) or len(value) > 1800:
         raise ValueError('Supply a CVPilot application link or commit ID.')
+    value=value.strip()  # Pasting a line from job-url.txt may include its newline.
     parsed = urlsplit(value)
     if parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password or parsed.port:
         raise ValueError('Supply an HTTPS application link without credentials or a port.')
@@ -97,8 +98,18 @@ def link_target(uid, repo, user, value, store):
                 path = '/'.join(item.get('path', '').split('/')[:3])
                 if APPLICATION.fullmatch(path):
                     matches.add(path)
-        if len(matches) != 1:
-            raise ValueError('That posting link does not identify one application. Use its CVPilot GitHub link or commit ID.')
+        # History keeps completed jobs after deletion. Only folders that still
+        # contain a resume on the freshly fetched main can be deleted. A normal
+        # revert restores a folder and therefore makes it a candidate again.
+        matches={path for path in matches if any(name.endswith(('.pdf','.tex'))
+                 for name in entries(uid,repo,'origin/main',path))}
+        if not matches:
+            raise ValueError('No current application matches that posting link. It may already be deleted. Use a current CVPilot GitHub folder link or commit ID.')
+        if len(matches)>1:
+            links='\n'.join(f'https://github.com/{user["repo"]}/tree/main/{path}' for path in sorted(matches)[:3])
+            more=f'\nShowing 3 of {len(matches)} matches.' if len(matches)>3 else ''
+            raise ValueError(f'That posting link matches {len(matches)} current applications, so it does not identify one application. '
+                             'Copy the GitHub folder link for the resume you want to delete:\n'+links+more)
         return matches.pop(), None
     parts = unquote(parsed.path).strip('/').split('/')
     if len(parts) < 4 or '/'.join(parts[:2]).lower() != user['repo'].lower():

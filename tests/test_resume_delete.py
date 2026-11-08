@@ -140,6 +140,45 @@ class ResumeDeleteTests(unittest.TestCase):
             self.call('application-delete', {'link': url})
         with self.assertRaises(ValueError): self.call('application-delete', {'link': url}, uid=OTHER)
 
+    def test_posting_link_ignores_deleted_jobs_and_copy_paste_whitespace(self):
+        url='https://example.invalid/jobs/social-work'
+        old_id,old_path,old=self.app(url)
+        self.finish(self.confirmed('application-delete',commit=old['commit'][:12]))
+        jid,path,app=self.app(url,suffix='-example-community-social-worker')
+        preview=self.call('application-delete',{'link':' \n'+url+'\n'})
+        self.assertIn(path,preview['text']);self.assertNotIn(old_path+'?',preview['text'])
+        self.assertEqual(self.store.job(old_id)['state'],'done')
+        self.assertIsNone(self.store.claim())
+
+    def test_posting_link_with_only_deleted_matches_reports_no_current_application(self):
+        url='https://example.invalid/jobs/social-work';jid,path,app=self.app(url)
+        self.finish(self.confirmed('application-delete',commit=app['commit'][:12]))
+        with self.assertRaisesRegex(ValueError,'No current application matches'):
+            self.call('application-delete',{'link':url})
+
+    def test_real_posting_ambiguity_lists_only_current_owned_folder_links(self):
+        url='https://example.invalid/jobs/social-work'
+        _,removed_path,removed=self.app(url)
+        deletion=self.finish(self.confirmed('application-delete',commit=removed['commit'][:12]))
+        _,first,_=self.app(url);_,second,_=self.app(url,suffix='-example-social-worker')
+        with self.assertRaises(ValueError) as caught:self.call('application-delete',{'link':url})
+        message=str(caught.exception)
+        self.assertIn('matches 2 current applications',message)
+        for path in (first,second):self.assertIn(f'https://github.com/CV-Pilot/cvpilot-{UID}/tree/main/'+path,message)
+        self.assertNotIn(removed_path+'\n',message)
+        self.fixture.finish(self.fixture.revert_job(deletion['commit']))
+        with self.assertRaisesRegex(ValueError,'matches 3 current applications'):
+            self.call('application-delete',{'link':url})
+
+    def test_posting_link_ignores_folders_removed_directly_on_main(self):
+        url='https://example.invalid/jobs/social-work';_,path,app=self.app(url)
+        seed=self.fixture.fixture.seed
+        self.git('-C',str(seed),'rm','-r','--',path)
+        self.git('-C',str(seed),'commit','-m','Remove application outside CVPilot')
+        self.git('-C',str(seed),'push','origin','main')
+        _,current,_=self.app(url)
+        self.assertIn(current,self.call('application-delete',{'link':url})['text'])
+
     def test_exactly_one_valid_selector_required_and_no_side_effects(self):
         self.upload(); head = self.main()
         for kind, values in [('master-delete', [{}, {'label': 'general', 'commit': head}, {'label': '../general'}, {'link': 'https://example.invalid'}]),
@@ -250,7 +289,7 @@ class ResumeDeleteTests(unittest.TestCase):
             self.call('master-delete', {'commit': source['commit']})
         with self.assertRaisesRegex(ValueError, 'last repository reset'):
             self.call('application-delete', {'link': app['url']})
-        with self.assertRaisesRegex(ValueError, 'one application'):
+        with self.assertRaisesRegex(ValueError, 'No current application matches'):
             self.call('application-delete', {'link': 'https://example.invalid/jobs/teaching'})
 
     def test_concurrent_push_during_deletion_is_preserved(self):

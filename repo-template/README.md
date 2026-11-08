@@ -89,7 +89,10 @@ where supported, without requiring pull-request reviews.
 - `/cvpilot application delete link:<URL>` or `/cvpilot application delete commit:<ID>`
   removes one tailored application's folder, including PDF, TeX, notes and posting link.
   Use the CVPilot GitHub result link, an application folder/file link, or the original
-  posting URL if it identifies exactly one completed application.
+  posting URL if it identifies exactly one current application.
+  Deleted folders are excluded when matching a posting URL. If several current
+  applications use that URL, CVPilot shows their GitHub folder links so you can
+  choose one explicitly. Reverting a deletion makes that folder eligible again.
 
 Supply exactly one selector. Commit IDs need at least 7 characters and must
 identify one resume in your main history after the latest reset. A commit for
