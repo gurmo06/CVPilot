@@ -150,7 +150,7 @@ class JobStatusTests(unittest.TestCase):
               mock.patch.object(worker,'validate_agent_task'),
               mock.patch.object(worker,'run',return_value=json.dumps(response)) as agent,
               mock.patch.object(main_commits,'recover',return_value=None),
-              mock.patch.object(main_commits,'begin',return_value={}),
+              mock.patch.object(main_commits,'begin',return_value={'base':'a'*40}),
               mock.patch.object(main_commits,'publish') as publish,
               mock.patch.object(worker,'compile_pdf') as compile_pdf):
             with self.assertRaisesRegex(RuntimeError,'Unable to fetch this Workday posting') as failure:

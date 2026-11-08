@@ -269,14 +269,24 @@ class ResumeWorkflowTests(unittest.TestCase):
         self.git('-C',str(self.seed),'commit','-m','GitHub-equivalent upload')
         self.git('-C',str(self.seed),'push','origin','main')
         self.assertFalse((worker.repopath(UID)/'master-resumes/general/resume.pdf').exists())
+        calls=[]
         def agent(args,**kwargs):
+            if args[0]=='docker' and 'pdftotext' in args:
+                calls.append('pdf-text');return 'Verified teaching experience from the PDF source'
             if args[0]=='openclaw':
+                calls.append('agent')
                 task=worker.agent_taskdir(UID,200)
                 self.assertEqual((task/'master-resumes/general/resume.pdf').read_bytes(),PDF)
-                destination=task/'applications/2026/job-200';destination.mkdir(parents=True)
-                (destination/'resume.tex').write_bytes(TEX)
-                (destination/'job-url.txt').write_text('https://example.org/job')
-                return AGENT_OK
+                prompt=Path(args[args.index('--message-file')+1]).read_text()
+                self.assertIn('Verified teaching experience from the PDF source',prompt)
+                pack=json.loads((task/'.cvpilot-sync-inputs.json').read_text())
+                path='master-resumes/general/resume.pdf'
+                profile={'status':'updated','profile_markdown':'# Career profile\nVerified teaching experience.',
+                         'profile_sources':{'schema_version':1,'source_manifest':pack['source_manifest'],
+                            'facts':{'teaching':{'text':'Verified teaching experience',
+                                'sources':[{'path':path,'sha256':pack['source_manifest'][path]}]}}}}
+                text='```cvpilot-resume-tex\n'+TEX.decode()+'\n```\n```cvpilot-notes\nVerified teaching keywords.\n```\n```cvpilot-profile-json\n'+json.dumps(profile)+'\n```'
+                return json.dumps({'payloads':[{'text':text}]})
             return original_run(args,**kwargs)
         original_run=worker.run
         def compile_pdf(task,target):
@@ -286,8 +296,8 @@ class ResumeWorkflowTests(unittest.TestCase):
             job={'discord_id':UID,'id':200,'kind':'tailor','payload':json.dumps({'url':'https://example.org/job'})}
             result=worker.run_resume_job(job,self.store)
         self.assertEqual(len(result['artifacts']),2)
-        self.assertIn('PDF is available',worker.agent_prompt(job,Path('/unused')))
-        self.assertEqual(dict(resumes.artifact_files(worker.repopath(UID),result)),{'resume.pdf':PDF,'resume.tex':TEX})
+        self.assertEqual(calls,['pdf-text','agent'])
+        self.assertEqual(dict(resumes.artifact_files(worker.repopath(UID),result)),{'resume.pdf':PDF,'resume.tex':TEX+b'\n'})
         worker.cleanup_completed(UID,200)
         self.assertEqual(len(resumes.artifact_files(worker.repopath(UID),result)),2)
         self.assertEqual(self.git('-C',str(self.remote),'rev-parse','main'),result['commit'])

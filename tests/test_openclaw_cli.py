@@ -74,7 +74,7 @@ class OpenClawCLITests(unittest.TestCase):
         response={'status':'error','result':{'payloads':[{'text':'Actual model failure','isError':True}],'meta':{}}}
         with (mock.patch.object(worker,'ROOT',self.root),mock.patch.object(worker,'new_worktree',return_value=(task,'main')),
               mock.patch.object(worker,'stage_agent_task',return_value=task),mock.patch.object(worker,'validate_agent_task'),
-              mock.patch.object(main_commits,'recover',return_value=None),mock.patch.object(main_commits,'begin',return_value={}),
+              mock.patch.object(main_commits,'recover',return_value=None),mock.patch.object(main_commits,'begin',return_value={'base':'a'*40}),
               mock.patch.object(main_commits,'publish') as publish,
               mock.patch.object(worker,'run',side_effect=openclaw_cli.failure(1,['openclaw','agent'],json.dumps(response),'warning'))):
             with self.assertRaisesRegex(RuntimeError,'Actual model failure'):worker.run_resume_job(job,store)

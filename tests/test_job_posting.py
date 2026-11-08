@@ -88,7 +88,7 @@ class JobPostingTests(unittest.TestCase):
     def test_supplied_posting_prompt_uses_exact_text_without_refetch(self):
         job={'discord_id':fixtures.UID,'id':32,'kind':'tailor','payload':json.dumps({'url':URL})}
         with mock.patch.object(job_posting,'request_json',return_value=self.response()):posting=job_posting.fetch(URL)
-        prompt=worker.agent_prompt(job,Path('/unused'),posting)
+        prompt=worker.agent_prompt(job,Path('/unused'),posting,{'documents':[{'path':'master-resumes/general/resume.tex','text':'Verified source'}]})
         self.assertIn('Do not web_fetch or web_search',prompt);self.assertIn(posting['text'].splitlines()[0],prompt)
         self.assertIn('untrusted factual evidence',prompt);self.assertIn('EXACT POSTING DATA',prompt)
         self.assertIn('Match the posting\'s important role-specific keywords',prompt)
@@ -102,7 +102,7 @@ class JobPostingTests(unittest.TestCase):
             (task/'master-resumes/general/resume.tex').write_text('Source')
             with (mock.patch.object(worker,'ROOT',root),mock.patch.object(worker,'new_worktree',return_value=(task,'main')),
                   mock.patch.object(worker,'stage_agent_task',return_value=task),mock.patch.object(main_commits,'recover',return_value=None),
-                  mock.patch.object(main_commits,'begin',return_value={}),mock.patch.object(main_commits,'publish') as publish,
+                  mock.patch.object(main_commits,'begin',return_value={'base':'a'*40}),mock.patch.object(main_commits,'publish') as publish,
                   mock.patch.object(job_posting,'fetch',side_effect=RuntimeError('Posting unavailable')),
                   mock.patch.object(worker,'run') as agent):
                 with self.assertRaisesRegex(RuntimeError,'Posting unavailable'):worker.run_resume_job(job,store)
