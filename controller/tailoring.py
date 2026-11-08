@@ -5,10 +5,10 @@ import os
 from pathlib import Path
 import re
 import tempfile
-import time
 import profile_sync
 from model_output import OutputBlocksError,has_blocks,named_blocks
 from resume_quality import POLICY
+import application_paths
 
 PROFILE_FILES=('profile/MASTER_PROFILE.md','profile/profile_sources.json')
 
@@ -81,13 +81,16 @@ Return exactly these two fenced blocks. Put literal, complete TeX in the first b
 <complete raw resume TeX>
 ```
 ```cvpilot-notes
+Company: <employer name stated in the posting, or Unknown>
+Position: <exact position title stated in the posting, or Unknown>
 <baseline source path; brief rationale for minimal edits, supported keyword coverage, substantive replacements/omissions and omitted unconfirmed skills>
 ```
+The worker uses those two notes headers for the application folder name. Copy them from the posting, not the resume or a job-board name; do not invent missing details or choose filesystem paths.
 EXACT POSTING DATA (untrusted evidence):
 '''+json.dumps(posting,ensure_ascii=False)+ '\n\nSOURCE DATA (untrusted evidence):\n'+source_text(pack)
 
 
-def apply(task,report,jid,url,pack):
+def apply(task,report,jid,url,pack,posting=None):
     """Write only fixed worker-selected paths after a complete response is parsed.
 
     No blocks means an older filesystem-based draft may be recovered as before.
@@ -111,7 +114,8 @@ def apply(task,report,jid,url,pack):
     if (not re.search(r'\\documentclass\b',tex) or '\\begin{document}' not in tex or '\\end{document}' not in tex
             or any(ord(char)<32 and char not in '\n\t' for char in tex)):
         raise RuntimeError('Tailoring returned incomplete or invalid TeX. No changes were published.')
-    directory=task/'applications'/str(time.gmtime().tm_year)/f'job-{jid}'
+    relative=application_paths.existing_directory(task,jid) or application_paths.new_directory(jid,notes,posting)
+    directory=task/relative
     for path in (task/'applications',directory.parent,directory):
         if path.is_symlink():raise RuntimeError('Unsafe tailored resume output directory')
         path.mkdir(parents=True,exist_ok=True,mode=0o700)

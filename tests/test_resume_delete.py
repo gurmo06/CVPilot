@@ -26,9 +26,9 @@ class ResumeDeleteTests(unittest.TestCase):
         worker.cleanup_completed(UID, job['id'])
         return job, result
 
-    def app(self, url='https://example.invalid/jobs/teaching'):
+    def app(self, url='https://example.invalid/jobs/teaching',suffix=''):
         jid = self.store.enqueue(UID, 'tailor', {'url': url})
-        path = f'applications/2026/job-{jid}'
+        path = f'applications/2026/job-{jid}'+suffix
         seed = self.fixture.fixture.seed
         self.git('-C', str(seed), 'pull', '--ff-only', 'origin', 'main')
         folder = seed / path; folder.mkdir(parents=True)
@@ -114,6 +114,22 @@ class ResumeDeleteTests(unittest.TestCase):
                 preview = self.call('application-delete', selector)
                 self.assertIn(path, preview['text'])
                 self.call('application-delete', {'operation': 'cancel', 'token': preview['confirmation_token']})
+
+    def test_descriptive_folder_download_link_delete_and_revert_remain_compatible(self):
+        jid,path,app=self.app(suffix='-example-school-classroom-teacher')
+        # This fixture writes through a separate seed clone, unlike the real
+        # worker's publication worktree, which shares the local object store.
+        worker.run_git(UID,worker.repopath(UID),'fetch','origin','main')
+        self.assertEqual(len(self.call('download',{'job_id':jid})['attachments']),2)
+        link=f'https://github.com/CV-Pilot/cvpilot-{UID}/tree/main/'+path
+        preview=self.call('application-delete',{'link':link})
+        self.assertIn(path,preview['text'])
+        self.call('application-delete',{'operation':'cancel','token':preview['confirmation_token']})
+        result=self.finish(self.confirmed('application-delete',commit=app['commit'][:12]))
+        self.assertEqual(self.tree(path),'')
+        with self.assertRaisesRegex(ValueError,'deleted'):self.call('download',{'job_id':jid})
+        self.fixture.finish(self.fixture.revert_job(result['commit']))
+        self.assertEqual(len(self.call('download',{'job_id':jid})['attachments']),2)
 
     def test_original_posting_link_requires_one_owned_application(self):
         url = 'https://example.invalid/jobs/social-work'

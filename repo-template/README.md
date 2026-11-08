@@ -60,7 +60,10 @@ bot does not combine files from different versions.
 - `master-resumes/<label>/resume.pdf` and/or `resume.tex`: source resumes.
 - `profile/MASTER_PROFILE.md` and `profile/profile_sources.json`: verified facts
   and their sources, including work, education, certifications and volunteering.
-- `applications/YYYY/job-<id>/{resume.tex,resume.pdf,job-url.txt}`: tailored output.
+- `applications/YYYY/job-<id>-<company>-<position>/{resume.tex,resume.pdf,job-url.txt}`:
+  tailored output, for example `job-40-t-mobile-software-engineering-internship`.
+  Names use bounded filename-safe slugs from the posting, keeping the unique job
+  ID. Unavailable details are omitted. Earlier `job-<id>` folders remain usable.
 
 Successful uploads, resume edits, tailored applications and profile changes
 commit directly to `main` after validation. CVPilot creates no per-job branches.

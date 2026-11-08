@@ -70,6 +70,8 @@ class TailoringTests(unittest.TestCase):
         self.assertNotIn('cvpilot-profile-json',prompt)
         self.assertIn(POLICY,prompt)
         self.assertIn('Do not rewrite or shorten every bullet preemptively',prompt)
+        self.assertIn('Company: <employer name stated in the posting',prompt)
+        self.assertIn('Position: <exact position title stated in the posting',prompt)
         with self.assertRaisesRegex(ValueError,'readable resume text'):tailoring.prompt(job,None,None)
 
     def test_template_text_is_literal_tex_instead_of_json_escaped(self):
@@ -229,7 +231,7 @@ class TailoringWorkflowTests(unittest.TestCase):
             # No model writes or reads the sandbox task. The worker owns output.
             canonical=worker.taskdir(self.uid,jid)
             pack=json.loads((canonical/'.cvpilot-sync-inputs.json').read_text())
-            return json.dumps(response(profile=updated(pack)))
+            return json.dumps(response(notes='Company: Example School\nPosition: Classroom Teacher\nVerified classroom keywords.',profile=updated(pack)))
         def compile_pdf(task,tex):
             self.assertIn('Verified teaching experience',tex.read_text())
             tex.with_suffix('.pdf').write_bytes(workflow.PDF)
@@ -237,7 +239,7 @@ class TailoringWorkflowTests(unittest.TestCase):
             result=worker.work(job,self.store)
         self.assertEqual(len(calls),1);self.assertTrue(result['on_main']);self.assertTrue(result['changed'])
         self.assertEqual(len(result['artifacts']),2)
-        folder=f'applications/{time.gmtime().tm_year}/job-{jid}'
+        folder=f'applications/{time.gmtime().tm_year}/job-{jid}-example-school-classroom-teacher'
         for name in ('resume.pdf','resume.tex','job-url.txt','notes.md'):
             self.assertTrue(self.fixture.git('-C',str(self.fixture.remote),'ls-tree','main','--',folder+'/'+name))
         self.assertEqual(self.fixture.git('-C',str(self.fixture.remote),'show','main:master-resumes/teaching/resume.tex'),workflow.TEX.decode())
@@ -246,6 +248,9 @@ class TailoringWorkflowTests(unittest.TestCase):
         self.assertEqual(set(self.fixture.git('-C',str(self.fixture.remote),'diff-tree','--no-commit-id','--name-only','-r','main').splitlines()),
                          {folder+'/'+name for name in ('resume.pdf','resume.tex','job-url.txt','notes.md')})
         self.assertEqual(self.fixture.git('-C',str(self.fixture.remote),'for-each-ref','--format=%(refname)','refs/heads'),'refs/heads/main')
+        self.store.finish(jid,'done',result)
+        downloaded=self.fixture.call('download',{'job_id':jid})
+        self.assertEqual(set(workflow.resumes.validate_files(downloaded['attachments'])),{'resume.pdf','resume.tex'})
 
     def test_profile_change_during_compilation_prevents_publication(self):
         jid=self.store.enqueue(self.uid,'tailor',{'url':URL});job=self.store.claim()

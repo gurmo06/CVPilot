@@ -42,7 +42,8 @@ class MeasurementTests(unittest.TestCase):
             def run(argv,**kwargs):
                 calls.append(argv)
                 return 'Pages: 1' if 'pdfinfo' in argv else ''
-            for relative,expected in (('master-resumes/general/resume.tex',False),('applications/2026/job-1/resume.tex',True)):
+            for relative,expected in (('master-resumes/general/resume.tex',False),('applications/2026/job-1/resume.tex',True),
+                                      ('applications/2026/job-2-example-school-classroom-teacher/resume.tex',True)):
                 tex=root/relative;tex.parent.mkdir(parents=True);tex.write_text(TEX);tex.with_suffix('.pdf').write_bytes(workflow.PDF)
                 with mock.patch.object(worker,'run',side_effect=run):worker.compile_pdf(root,tex)
                 self.assertEqual(tex.with_name('.cvpilot-layout-resume.tex').exists(),expected)

@@ -9,6 +9,7 @@ import re
 import secrets
 import shutil
 import subprocess
+from application_paths import DIRECTORY
 
 MAX_FILE_BYTES = 8 * 1024 * 1024
 MAX_PACKET_BYTES = 24 * 1024 * 1024
@@ -115,7 +116,7 @@ def staged_files(root, uid, payload):
 
 def safe_artifact_path(path):
     return isinstance(path, str) and (re.fullmatch(
-        r'applications/[0-9]{4}/job-[0-9]+/resume\.(pdf|tex)', path) or re.fullmatch(
+        DIRECTORY+r'/resume\.(pdf|tex)', path) or re.fullmatch(
         r'master-resumes/[a-z][a-z0-9-]{0,39}/[A-Za-z0-9][A-Za-z0-9._-]*\.(pdf|tex)', path))
 
 

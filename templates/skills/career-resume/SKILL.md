@@ -19,6 +19,11 @@ The worker saves files at fixed job paths, verifies read-only inputs, compiles
 the one-page PDF and commits validated changes to main. For other tasks, follow
 their explicit task instructions and use complete absolute sandbox paths.
 
+Start initial notes with `Company: <employer>` and `Position: <exact title>`
+copied from the posting; use Unknown if unavailable. Keep these headers in
+later notes. The worker names the folder `job-<id>-<company>-<position>` using
+safe, bounded slugs. Do not invent names or choose output paths yourself.
+
 Resume labels are user-defined and default to `general`; they are not a fixed
 set of professions. Adapt to the real industry and job, including nontechnical
 careers. Consider relevant qualifications, practical experience, licenses,

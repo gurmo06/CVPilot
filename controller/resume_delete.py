@@ -8,6 +8,7 @@ import time
 from urllib.parse import urlsplit, unquote
 
 import main_commits
+from application_paths import DIRECTORY
 from resumes import label
 from repo_history import checked_repo
 from queue_status import acknowledgement
@@ -16,7 +17,7 @@ CONFIRMATIONS = {}
 LOCK = threading.Lock()
 TTL = 120
 MASTER = re.compile(r'master-resumes/[a-z][a-z0-9-]{0,39}\Z')
-APPLICATION = re.compile(r'applications/[0-9]{4}/job-[0-9]+\Z')
+APPLICATION = re.compile(DIRECTORY+r'\Z')
 
 
 def directory(kind, path):

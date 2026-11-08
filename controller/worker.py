@@ -1,6 +1,7 @@
 import json, os, re, secrets, shutil, subprocess, time, hashlib, tempfile
 from pathlib import Path
 from store import Store
+import application_paths
 from github import GitHub,GitHubAPIError,cmd,ssh_env,https_git_env
 from job_status import progress, missing_output
 from resumes import (label, inbox_path, staged_files, read_blob, artifact_files,
@@ -684,7 +685,7 @@ def compile_pdf(task, tex, *, require_one_page=True, measure_layout=None):
     from page_refinement import metrics_entry
     if measure_layout is None:
         measure_layout=(len(rel.parts)==4 and rel.parts[0]=='applications' and re.fullmatch(r'\d{4}',rel.parts[1])
-                        and re.fullmatch(r'job-\d+',rel.parts[2]) and texname=='resume.tex')
+                        and re.fullmatch(application_paths.COMPONENT,rel.parts[2]) and texname=='resume.tex')
     entry=metrics_entry(tex) if measure_layout else tex
     log=tex.with_suffix('.log')
     if log.is_symlink():raise RuntimeError('Unsafe compiler log')
@@ -749,7 +750,7 @@ def compile_uploaded_master(task, files, cache):
 def allowed_path(kind,path, payload):
     if path.startswith('profile/') and kind in ('profile-edit','profile-sync','master-edit'):return True
     if kind=='master-edit' and path.startswith(f"master-resumes/{payload['role']}/"):return True
-    if kind=='tailor' and re.fullmatch(r'applications/\d{4}/job-\d+/[A-Za-z0-9._/-]+',path):return True
+    if kind=='tailor' and re.fullmatch(application_paths.DIRECTORY+r'/[A-Za-z0-9._/-]+',path):return True
     return False
 
 def safe_output_filename(kind, rel, data):
@@ -758,7 +759,7 @@ def safe_output_filename(kind, rel, data):
     if kind=='tailor':
         # Exactly one application-specific directory, not arbitrary output.
         parts=rel.split('/')
-        return len(parts)==4 and parts[0]=='applications' and parts[2].startswith('job-') and parts[3] in ('resume.tex','resume.pdf','job-url.txt','notes.md')
+        return len(parts)==4 and re.fullmatch(application_paths.DIRECTORY,'/'.join(parts[:3])) is not None and parts[3] in ('resume.tex','resume.pdf','job-url.txt','notes.md')
     if kind=='master-edit' and rel.startswith(f"master-resumes/{data['role']}/"):
         return Path(rel).suffix.lower() in ('.tex','.pdf','.sty','.cls')
     return False
@@ -934,8 +935,9 @@ def run_resume_job(job,store,*,reuse_saved_response=False):
         verified_facts=profile_sync.validate(task,sync_inputs,KIT/'repo-template/profile/MASTER_PROFILE.md',prior_confirmed)
     if kind=='tailor':
         import tailoring
-        tailoring.apply(task,response,jid,data['url'],resume_inputs)
-        target=task/'applications'/str(time.gmtime().tm_year)/f'job-{jid}'/'resume.tex'
+        tailoring.apply(task,response,jid,data['url'],resume_inputs,posting)
+        folder=application_paths.existing_directory(task,jid) or application_paths.new_directory(jid,posting=posting)
+        target=task/folder/'resume.tex'
         if not target.is_file():raise RuntimeError(missing_output(target.relative_to(task),response))
         import page_refinement
         page_fit=page_refinement.fit(w,job,store,task,target,resume_inputs,posting,response,deadline,allow_model=not reuse_saved_response)
