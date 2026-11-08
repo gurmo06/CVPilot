@@ -54,6 +54,8 @@ class MeasurementTests(unittest.TestCase):
         self.assertAlmostEqual(m['first_page_spare_pt'],30)
         self.assertEqual(m['line_pitch_pt'],12);self.assertEqual(m['target_lines'],3)
         self.assertAlmostEqual(m['net_overflow_pt'],28)
+        self.assertEqual(len(m['rendered_lines']),7)
+        self.assertIn('P1.L2: First | Aligned',m['rendered_lines'])
 
     def test_multiple_overflow_pages_and_footer_numbers(self):
         m=fit.measure_xml(bbox([[(20,700,'End')],[(20,20,'One'),(20,32,'Two'),(20,770,'2')],
@@ -95,7 +97,50 @@ class MeasurementTests(unittest.TestCase):
         self.assertIn('recover 5 rendered line-equivalents',prompt)
         self.assertIn('60.00 pt of net overflow',prompt);self.assertIn('12.00 pt per body line',prompt)
         self.assertIn('already credited',prompt);self.assertIn('Do not generically shorten',prompt)
+        self.assertIn('Keep approximately 60 of those 65 rows',prompt)
         self.assertIn('cvpilot-resume-body',prompt);self.assertNotIn('cvpilot-profile-json',prompt)
+        self.assertIn('```cvpilot-resume-body\n',prompt)
+        self.assertIn('```cvpilot-notes\n',prompt)
+
+    def test_rendered_line_map_uses_readable_unicode_outside_json_strings(self):
+        measured=metrics();measured['rendered_lines']=['P1.L1: Teaching – training']
+        prompt=fit.revision_prompt({'id':36},{'documents':[{'path':'resume.tex','text':TEX}]},None,TEX,'Notes',measured,1,'')
+        self.assertIn('P1.L1: Teaching – training',prompt)
+        self.assertNotIn('\\u2013',prompt)
+
+    def test_heading_and_generic_tex_fence_match_the_first_live_response_shape(self):
+        text='**cvpilot-resume-body**  \n```tex\nConcise resume content.\n```  \n\n**cvpilot-notes**  \n- Recovered the measured lines.\n'
+        document,notes=fit.parse_revision({'payloads':[{'text':text}]},TEX)
+        self.assertIn('Concise resume content.',document)
+        self.assertEqual(notes,'- Recovered the measured lines.\n')
+        upper=text.replace('cvpilot-resume-body','CVPilot-Resume-Body').replace('cvpilot-notes','CVPilot-Notes')
+        self.assertIn('Concise resume content.',fit.parse_revision({'final':upper},TEX)[0])
+
+    def test_complete_body_with_unclosed_notes_matches_later_live_response_shapes(self):
+        text='```cvpilot-resume-body\nConcise resume content.\n```\n```cvpilot-notes\n- Completed rationale without closing notes fence.'
+        document,notes=fit.parse_revision({'payloads':[{'text':text}]},TEX)
+        self.assertIn('Concise resume content.',document)
+        self.assertIn('Completed rationale',notes)
+
+    def test_notes_are_optional_but_the_tex_body_is_not(self):
+        document,notes=fit.parse_revision({'final':'```cvpilot-resume-body\nConcise resume content.\n```'},TEX)
+        self.assertIn('Concise resume content.',document);self.assertEqual(notes,'')
+        for text in ('```cvpilot-notes\nOnly notes.\n```','Unlabelled prose.',
+                     '```tex\nAmbiguous unlabelled TeX.\n```'):
+            with self.subTest(text=text),self.assertRaises(fit.RevisionRejected):fit.parse_revision({'final':text},TEX)
+
+    def test_truncated_or_duplicate_body_is_never_repaired_by_guessing_a_closing_fence(self):
+        invalid=['```cvpilot-resume-body\nIncomplete body',
+                 '**cvpilot-resume-body**\n```latex\nIncomplete body',
+                 '```cvpilot-resume-body\nUnclosed body\n```cvpilot-notes\nNotes\n```',
+                 '```cvpilot-resume-body\nUnclosed body\n**cvpilot-notes**\nNotes\n```',
+                 revision()['payloads'][0]['text']+'\n```cvpilot-resume-body\nDuplicate body\n```']
+        for text in invalid:
+            with self.subTest(text=text),self.assertRaises(fit.RevisionRejected):fit.parse_revision({'final':text},TEX)
+
+    def test_cosmetic_framing_does_not_disable_readability_checks(self):
+        text='## cvpilot-resume-body\n```latex\n\\tiny Shrunk content.\n```\n## cvpilot-notes\nShortened.'
+        with self.assertRaisesRegex(fit.RevisionRejected,'changed fonts'):fit.parse_revision({'final':text},TEX)
 
 
 class RefinementLoopTests(unittest.TestCase):
@@ -193,6 +238,12 @@ class RefinementLoopTests(unittest.TestCase):
     def test_already_one_page_needs_no_measurement_or_model_round(self):
         result=self.run_fit([None],[],[])
         self.assertEqual(result,{'rounds':0,'pages':1});self.worker.agent_completion.assert_not_called()
+
+    def test_missing_optional_notes_preserve_previous_notes_in_the_fitting_result(self):
+        report={'final':'```cvpilot-resume-body\nConcise resume content.\n```'}
+        self.run_fit([generated_tex.PageCountError(self.tex.with_suffix('.pdf'),2),None],
+                     [metrics(),metrics(1,720,0)],[report])
+        self.assertEqual((self.task/'notes.md').read_text(),'Original notes')
 
 
 class RefinementWorkflowTests(unittest.TestCase):
