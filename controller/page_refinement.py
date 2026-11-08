@@ -12,12 +12,11 @@ import tempfile
 import time
 import xml.etree.ElementTree as ET
 from generated_tex import PageCountError,TexCompileError,compile_generated
+from model_output import OutputBlocksError,named_blocks
 
 MAX_ROUNDS=12
 MAX_STALLED=3
 METRIC=re.compile(r'CVPILOTLAYOUT:([-+0-9.]+)pt\|([-+0-9.]+)pt')
-REVISION_LABELS={'cvpilot-resume-body','cvpilot-notes'}
-FENCE=re.compile(r'^(`{3,}|~{3,})[ \t]*([^\r\n]*?)\s*$')
 LAYOUT_NAMES=set(('fontsize fontfamily fontseries fontshape selectfont tiny scriptsize footnotesize small normalsize large Large LARGE huge Huge '
  'vspace hspace vskip hskip kern linespread baselinestretch setstretch setlength addtolength geometry newgeometry restoregeometry '
  'enlargethispage scalebox resizebox pagebreak newpage clearpage cleardoublepage textheight textwidth paperheight paperwidth '
@@ -30,61 +29,9 @@ FONT_CALL=re.compile(r'^\\(?:fontsize|fontfamily|fontseries|fontshape|selectfont
 class RevisionRejected(ValueError):pass
 
 
-def _label(line):
-    if FENCE.fullmatch(line.strip()):return None
-    value=re.sub(r'^#{1,6}\s*','',line.strip()).strip('*_` \t:').casefold()
-    return value if value in REVISION_LABELS else None
-
-
 def revision_blocks(text):
-    """Require a closed, named TeX body; notes may be ordinary Markdown/EOF.
-
-    A heading immediately before a tex/latex fence is equivalent to a named
-    fence. Never infer a body from unrelated prose or silently close its fence.
-    Notes are non-executable and optional, so their cosmetic framing cannot
-    invalidate an otherwise complete, compiler-checked resume.
-    """
-    lines=text.splitlines(keepends=True);blocks={};pending=None;i=0
-    def put(label,value):
-        if label in blocks:raise RevisionRejected('Duplicate refinement blocks')
-        blocks[label]=value
-    while i<len(lines):
-        line=lines[i].strip();heading=_label(line)
-        if heading:
-            pending=heading;i+=1;continue
-        opening=FENCE.fullmatch(line)
-        if opening:
-            fence,info=opening.groups();label=info.casefold() if info.casefold() in REVISION_LABELS else None
-            if label is None and pending:
-                languages=('', 'tex','latex') if pending=='cvpilot-resume-body' else ('','text','md','markdown')
-                if info.lower() in languages:label=pending
-            pending=None;i+=1;start=i;closed=False
-            while i<len(lines):
-                candidate=lines[i].strip()
-                if re.fullmatch(re.escape(fence[0])+'{'+str(len(fence))+',}[ \t]*',candidate):
-                    closed=True;break
-                other=FENCE.fullmatch(candidate)
-                next_label=other[2].casefold() if other else _label(candidate)
-                if label=='cvpilot-resume-body' and next_label in REVISION_LABELS:
-                    raise RevisionRejected('Resume body fence is not closed before the next block')
-                i+=1
-            if label=='cvpilot-resume-body' and not closed:
-                raise RevisionRejected('Return a complete, closed cvpilot-resume-body TeX block')
-            if label:put(label,''.join(lines[start:i]))
-            if closed:i+=1
-            continue
-        if pending=='cvpilot-notes' and line:
-            start=i
-            while i<len(lines):
-                candidate=lines[i].strip();other=FENCE.fullmatch(candidate)
-                if _label(candidate) or (other and other[2].casefold() in REVISION_LABELS):break
-                i+=1
-            put(pending,''.join(lines[start:i]));pending=None;continue
-        if line:pending=None
-        i+=1
-    if not blocks.get('cvpilot-resume-body','').strip():
-        raise RevisionRejected('Return one complete, labelled cvpilot-resume-body TeX block')
-    return blocks
+    try:return named_blocks(text,'cvpilot-resume-body')
+    except OutputBlocksError as exc:raise RevisionRejected(str(exc)) from exc
 
 
 def metrics_entry(tex):
@@ -314,8 +261,8 @@ def fit(w,job,store,task,tex,inputs,posting,initial_response,deadline,*,allow_mo
                 save(round_no,report,candidate_metrics,'over_shortened',feedback,retained=metrics);stalled+=1;restore()
             elif candidate_metrics['pages']==1:
                 save(round_no,report,candidate_metrics,'fits')
-                # Keep a complete three-block response for existing recovery.
-                complete={'payloads':[{'text':'```cvpilot-resume-tex\n'+tex.read_text()+'\n```\n```cvpilot-notes\n'+notes+'\n```\n```cvpilot-profile-json\n{"status":"unchanged"}\n```'}],
+                # Recovery needs a complete document and notes, never a profile mutation.
+                complete={'payloads':[{'text':'```cvpilot-resume-tex\n'+tex.read_text()+'\n```\n```cvpilot-notes\n'+notes+'\n```'}],
                           'meta':report.get('meta',{})}
                 w._write_intent(canonical,complete)
                 return {'rounds':round_no,'pages':1,'initial_target_lines':json.loads((directory/'round-000/measurement.json').read_text())['metrics']['target_lines']}
@@ -323,7 +270,7 @@ def fit(w,job,store,task,tex,inputs,posting,initial_response,deadline,*,allow_mo
                 save(round_no,report,candidate_metrics,'overflow')
                 best_files={path:path.read_bytes() for path in best_files};metrics=candidate_metrics;stalled=0
                 # Recovery needs the full document, not the body-only protocol.
-                best_report={'payloads':[{'text':'```cvpilot-resume-tex\n'+tex.read_text()+'\n```\n```cvpilot-notes\n'+notes+'\n```\n```cvpilot-profile-json\n{"status":"unchanged"}\n```'}],'meta':report.get('meta',{})}
+                best_report={'payloads':[{'text':'```cvpilot-resume-tex\n'+tex.read_text()+'\n```\n```cvpilot-notes\n'+notes+'\n```'}],'meta':report.get('meta',{})}
                 w._write_intent(canonical,best_report);feedback='The previous revision made progress. Apply only the newly measured remaining line budget.'
             else:
                 feedback='The last proposal did not reduce measured content height. Use the exact remaining line target and tighten wrapped wording instead of formatting.'

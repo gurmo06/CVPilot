@@ -747,7 +747,7 @@ def compile_uploaded_master(task, files, cache):
     return {**files,**compiled}
 
 def allowed_path(kind,path, payload):
-    if path.startswith('profile/') and kind in ('profile-edit','profile-sync','master-edit','tailor'):return True
+    if path.startswith('profile/') and kind in ('profile-edit','profile-sync','master-edit'):return True
     if kind=='master-edit' and path.startswith(f"master-resumes/{payload['role']}/"):return True
     if kind=='tailor' and re.fullmatch(r'applications/\d{4}/job-\d+/[A-Za-z0-9._/-]+',path):return True
     return False
@@ -934,11 +934,12 @@ def run_resume_job(job,store,*,reuse_saved_response=False):
         verified_facts=profile_sync.validate(task,sync_inputs,KIT/'repo-template/profile/MASTER_PROFILE.md',prior_confirmed)
     if kind=='tailor':
         import tailoring
-        tailoring.apply(task,response,jid,data['url'],resume_inputs,KIT/'repo-template/profile/MASTER_PROFILE.md')
+        tailoring.apply(task,response,jid,data['url'],resume_inputs)
         target=task/'applications'/str(time.gmtime().tm_year)/f'job-{jid}'/'resume.tex'
         if not target.is_file():raise RuntimeError(missing_output(target.relative_to(task),response))
         import page_refinement
         page_fit=page_refinement.fit(w,job,store,task,target,resume_inputs,posting,response,deadline,allow_model=not reuse_saved_response)
+        tailoring.validate_inputs(task,resume_inputs)
     if kind=='master-edit':
         progress(store.path.parent,job,'Compiling the edited master and validating the PDF')
         masters=list((task/'master-resumes'/data['role']).rglob('*.tex'))

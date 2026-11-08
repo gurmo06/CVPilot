@@ -7,9 +7,13 @@ For queued jobs with inline SOURCE DATA, all master resumes, original TeX layout
 profile facts and provenance are already supplied by the trusted worker. Do not
 browse sandbox directories or ask the user to supply those files again. Use
 supplied posting text when present; otherwise fetch the exact posting URL.
-Return the three fenced blocks requested by the worker: cvpilot-resume-tex,
-cvpilot-notes, and cvpilot-profile-json. Do not use filesystem tools or run Git.
-The worker saves files at fixed job paths, validates profile provenance, compiles
+Return the two fenced blocks requested by the worker: cvpilot-resume-tex and
+cvpilot-notes. During tailoring the profile and masters are read-only; do not
+return profile JSON. Use current master evidence directly even if the profile
+is empty or outdated. Use profile facts only when user-confirmed or cited to
+current source hashes; corroborate stale facts in current masters. Profile
+updates belong to /cvpilot profile sync. Do not use filesystem tools or run Git.
+The worker saves files at fixed job paths, verifies read-only inputs, compiles
 the one-page PDF and commits validated changes to main. For other tasks, follow
 their explicit task instructions and use complete absolute sandbox paths.
 

@@ -18,8 +18,9 @@ URL='https://jobs.example/teaching'
 
 
 def response(tex=TEX,notes='Teaching experience and supported classroom keywords.',profile=None):
-    profile=profile or {'status':'unchanged'}
-    return {'payloads':[{'text':f'```cvpilot-resume-tex\n{tex}\n```\n```cvpilot-notes\n{notes}\n```\n```cvpilot-profile-json\n'+json.dumps(profile)+'\n```'}]}
+    text=f'```cvpilot-resume-tex\n{tex}\n```\n```cvpilot-notes\n{notes}\n```'
+    if profile is not None:text+='\n```cvpilot-profile-json\n'+json.dumps(profile)+'\n```'
+    return {'payloads':[{'text':text}]}
 
 
 def updated(pack):
@@ -42,7 +43,7 @@ class TailoringTests(unittest.TestCase):
         self.folder=self.task/'applications'/str(time.gmtime().tm_year)/'job-33'
 
     def apply(self,report=None,pack=None):
-        return tailoring.apply(self.task,report or response(),33,URL,pack or self.pack,self.template)
+        return tailoring.apply(self.task,report or response(),33,URL,pack or self.pack)
 
     def test_all_nested_labels_are_inline_and_paired_pdf_does_not_replace_tex(self):
         pdf=self.task/'master-resumes/teaching/resume.pdf';pdf.write_bytes(workflow.PDF)
@@ -63,6 +64,9 @@ class TailoringTests(unittest.TestCase):
         self.assertIn('current_profile_sources',prompt);self.assertIn('cvpilot-resume-tex',prompt)
         self.assertNotIn('ONLY work inside',prompt);self.assertNotIn('/career/tasks',prompt)
         self.assertIn('ATS-friendly',prompt);self.assertIn('any profession',prompt)
+        self.assertIn('profile is read-only',prompt);self.assertIn('two fenced blocks',prompt)
+        self.assertIn('citations match the supplied current source hashes',prompt)
+        self.assertNotIn('cvpilot-profile-json',prompt)
         with self.assertRaisesRegex(ValueError,'readable resume text'):tailoring.prompt(job,None,None)
 
     def test_template_text_is_literal_tex_instead_of_json_escaped(self):
@@ -91,34 +95,80 @@ class TailoringTests(unittest.TestCase):
 
     def test_missing_truncated_duplicate_or_oversized_blocks_fail_before_outputs(self):
         original=response()['payloads'][0]['text']
-        invalid=[original.rsplit('```',1)[0],original.replace('```cvpilot-notes','```wrong-notes'),
+        invalid=['```cvpilot-resume-tex\n'+TEX,original.replace('```cvpilot-resume-tex','```wrong-tex'),
                  original+'\n```cvpilot-resume-tex\n'+TEX+'\n```',response(notes='x'*16001)['payloads'][0]['text'],
                  response(tex='x'*250001)['payloads'][0]['text']]
         for text in invalid:
             with self.subTest(size=len(text)),self.assertRaises(RuntimeError):self.apply({'payloads':[{'text':text}]})
             self.assertFalse(self.folder.exists())
 
-    def test_incomplete_tex_or_invalid_profile_cannot_be_published(self):
+    def test_incomplete_tex_cannot_be_published(self):
         for report in (response(tex=TEX.replace(r'\end{document}','')),
-                       response(profile={'status':'updated','profile_markdown':'Invented profile','profile_sources':{}}),
                        response(tex=TEX+'\x08')):
             with self.subTest(report=str(report)[:40]),self.assertRaises((RuntimeError,ValueError)):self.apply(report)
             self.assertFalse(self.folder.exists())
 
-    def test_new_profile_uses_source_hashes_and_preserves_confirmations(self):
+    def test_unsolicited_profile_is_ignored_and_confirmed_facts_are_byte_identical(self):
         prior={'text':'User-confirmed teaching credential','user_confirmed':True}
-        pack=copy.deepcopy(self.pack);pack['current_profile_sources']['facts']['confirmed']=prior
-        result=updated(pack)
-        with self.assertRaisesRegex(ValueError,'user-confirmed'):self.apply(response(profile=result),pack)
-        result['profile_sources']['facts']['confirmed']=prior
-        self.assertTrue(self.apply(response(profile=result),pack))
-        saved=json.loads((self.task/'profile/profile_sources.json').read_text())
+        path=self.task/'profile/profile_sources.json';saved=json.loads(path.read_text())
+        saved['facts']['confirmed']=prior;path.write_text(json.dumps(saved))
+        self.pack=tailoring.prepare(self.task,'a'*40,mock.Mock())
+        original={name:(self.task/name).read_bytes() for name in tailoring.PROFILE_FILES}
+        # Job #37 flattened facts/manifest and repeated profile entries. Even a
+        # syntactically valid or truncated unsolicited update must never apply.
+        bad={'status':'updated','profile_markdown':'Repeated entry\n'*50,'facts':{},'source_manifest':{}}
+        for suffix in ('\n```cvpilot-profile-json\n'+json.dumps(bad)+'\n```',
+                       '\n```cvpilot-profile-json\n{"status":"updated",',
+                       '\n**cvpilot-profile-json**\n'+json.dumps(updated(self.pack))):
+            self.assertTrue(self.apply({'final':response()['payloads'][0]['text']+suffix}))
+            self.assertEqual({name:(self.task/name).read_bytes() for name in original},original)
+        saved=json.loads(path.read_text())
         self.assertEqual(saved['facts']['confirmed'],prior)
 
-    def test_unchanged_decision_is_rejected_when_a_source_was_replaced(self):
+    def test_current_source_change_is_rejected(self):
         (self.task/'master-resumes/teaching/resume.tex').write_text(TEX+'\nNew source fact')
         with self.assertRaisesRegex(ValueError,'changed source resumes'):self.apply()
         self.assertFalse(self.folder.exists())
+
+    def test_profile_is_optional_and_stale_profile_is_left_unchanged(self):
+        for name in tailoring.PROFILE_FILES:(self.task/name).unlink()
+        self.pack=tailoring.prepare(self.task,'a'*40,mock.Mock())
+        self.assertTrue(self.apply())
+        self.assertTrue(all(not (self.task/name).exists() for name in tailoring.PROFILE_FILES))
+        (self.task/'profile/MASTER_PROFILE.md').write_text('# Old profile')
+        (self.task/'profile/profile_sources.json').write_text('{"schema_version":1,"source_manifest":{},"facts":{}}')
+        self.pack=tailoring.prepare(self.task,'a'*40,mock.Mock())
+        original=tailoring.profile_snapshot(self.task)
+        self.assertTrue(self.apply());self.assertEqual(tailoring.profile_snapshot(self.task),original)
+
+    def test_profile_modification_deletion_and_creation_are_rejected(self):
+        for name in tailoring.PROFILE_FILES:
+            path=self.task/name;original=path.read_bytes()
+            for change in ('modify','delete'):
+                if change=='modify':path.write_text('Unexpected model edit')
+                else:path.unlink()
+                with self.subTest(name=name,change=change),self.assertRaisesRegex(ValueError,'Read-only profile changed'):
+                    self.apply()
+                self.assertFalse(self.folder.exists());path.write_bytes(original)
+        path.unlink();self.pack=tailoring.prepare(self.task,'a'*40,mock.Mock());path.write_text('{}')
+        with self.assertRaisesRegex(ValueError,'Read-only profile changed'):self.apply()
+
+    def test_heading_tex_fence_and_optional_notes_are_supported(self):
+        for suffix in ('','\n**cvpilot-notes**\nPlain rationale.',
+                       '\n```cvpilot-notes\nUnclosed optional notes.'):
+            report={'final':'## CVPilot-Resume-Tex\n~~~latex\n'+TEX+'\n~~~'+suffix}
+            self.assertTrue(self.apply(report));self.assertEqual((self.folder/'resume.tex').read_text(),TEX+'\n')
+
+    def test_unclosed_notes_stop_before_unwanted_profile_metadata(self):
+        text='```cvpilot-resume-tex\n'+TEX+'\n```\n```cvpilot-notes\nSafe rationale.\n'
+        for metadata in ('```cvpilot-profile-json\n','**cvpilot-profile-json**\n'):
+            self.assertTrue(self.apply({'final':text+metadata+'Unwanted repeated profile data '*1000}))
+            self.assertEqual((self.folder/'notes.md').read_text(),'Safe rationale.\n')
+
+    def test_tailoring_allowlist_cannot_publish_or_delete_profile_files(self):
+        for name in tailoring.PROFILE_FILES:
+            self.assertFalse(worker.allowed_path('tailor',name,{}))
+            self.assertTrue(worker.allowed_path('profile-sync',name,{}))
 
     def test_reasoning_and_commentary_are_not_saved_as_resume_output(self):
         report={'payloads':[{'text':response()['payloads'][0]['text'],'isReasoning':True}]}
@@ -145,15 +195,28 @@ class TailoringTests(unittest.TestCase):
         self.assertTrue(self.apply(response(tex=tex)))
         self.assertEqual(source.read_text(),TEX)
 
+    def test_profile_symlink_is_rejected_before_extraction(self):
+        path=self.task/'profile/MASTER_PROFILE.md';path.unlink();path.symlink_to(self.template)
+        with self.assertRaisesRegex(ValueError,'Unsafe read-only profile'):
+            tailoring.prepare(self.task,'a'*40,mock.Mock())
+
 
 class TailoringWorkflowTests(unittest.TestCase):
     def setUp(self):
         self.fixture=workflow.ResumeWorkflowTests('runTest');self.fixture.setUp();self.addCleanup(self.fixture.doCleanups)
         self.store=self.fixture.store;self.uid=workflow.UID
+        directory=self.fixture.seed/'profile';directory.mkdir()
+        (directory/'MASTER_PROFILE.md').write_text('# Prior confirmed facts\nTeaching credential')
+        (directory/'profile_sources.json').write_text(json.dumps({'schema_version':1,'source_manifest':{},
+            'facts':{'credential':{'text':'Teaching credential','user_confirmed':True}}}))
+        self.fixture.git('-C',str(self.fixture.seed),'add','profile')
+        self.fixture.git('-C',str(self.fixture.seed),'commit','-m','Seed read-only profile')
+        self.fixture.git('-C',str(self.fixture.seed),'push','origin','main')
         job,_=self.fixture.upload(role='teaching');worker.cleanup_completed(self.uid,job['id'])
 
     def test_one_model_text_response_is_compiled_and_published_with_both_files(self):
         jid=self.store.enqueue(self.uid,'tailor',{'url':URL});job=self.store.claim();original=worker.run;calls=[]
+        before={name:self.fixture.git('-C',str(self.fixture.remote),'show','main:'+name) for name in tailoring.PROFILE_FILES}
         def agent(argv,**kwargs):
             if argv[0]!='openclaw':return original(argv,**kwargs)
             calls.append(argv)
@@ -176,7 +239,22 @@ class TailoringWorkflowTests(unittest.TestCase):
             self.assertTrue(self.fixture.git('-C',str(self.fixture.remote),'ls-tree','main','--',folder+'/'+name))
         self.assertEqual(self.fixture.git('-C',str(self.fixture.remote),'show','main:master-resumes/teaching/resume.tex'),workflow.TEX.decode())
         self.assertFalse(self.fixture.git('-C',str(self.fixture.remote),'ls-tree','main','--','.cvpilot-sync-inputs.json'))
+        self.assertEqual({name:self.fixture.git('-C',str(self.fixture.remote),'show','main:'+name) for name in before},before)
+        self.assertEqual(set(self.fixture.git('-C',str(self.fixture.remote),'diff-tree','--no-commit-id','--name-only','-r','main').splitlines()),
+                         {folder+'/'+name for name in ('resume.pdf','resume.tex','job-url.txt','notes.md')})
         self.assertEqual(self.fixture.git('-C',str(self.fixture.remote),'for-each-ref','--format=%(refname)','refs/heads'),'refs/heads/main')
+
+    def test_profile_change_during_compilation_prevents_publication(self):
+        jid=self.store.enqueue(self.uid,'tailor',{'url':URL});job=self.store.claim()
+        before=self.fixture.git('-C',str(self.fixture.remote),'rev-parse','main');original=worker.run
+        def agent(argv,**kwargs):
+            return json.dumps(response()) if argv[0]=='openclaw' else original(argv,**kwargs)
+        def compiler(task,tex):
+            tex.with_suffix('.pdf').write_bytes(workflow.PDF)
+            (task/'profile/MASTER_PROFILE.md').write_text('Unexpected change after response parsing')
+        with mock.patch.object(worker,'run',side_effect=agent),mock.patch.object(worker,'compile_pdf',side_effect=compiler):
+            with self.assertRaisesRegex(ValueError,'Read-only profile changed'):worker.work(job,self.store)
+        self.assertEqual(self.fixture.git('-C',str(self.fixture.remote),'rev-parse','main'),before)
 
     def test_truncated_agent_response_leaves_main_unchanged(self):
         jid=self.store.enqueue(self.uid,'tailor',{'url':URL});job=self.store.claim();before=self.fixture.git('-C',str(self.fixture.remote),'rev-parse','main')

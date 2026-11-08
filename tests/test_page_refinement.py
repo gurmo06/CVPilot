@@ -181,7 +181,8 @@ class RefinementLoopTests(unittest.TestCase):
         self.assertIn('Final concise draft',self.tex.read_text())
         report=json.loads((self.root/'job-reports'/UID/'35.json').read_text())
         self.assertIn('cvpilot-resume-tex',report['payloads'][0]['text'])
-        self.assertIn('"status":"unchanged"',report['payloads'][0]['text'])
+        self.assertIn('cvpilot-notes',report['payloads'][0]['text'])
+        self.assertNotIn('cvpilot-profile-json',report['payloads'][0]['text'])
         for path in (self.root/'job-drafts').rglob('*'):
             if path.is_file():self.assertEqual(path.stat().st_mode&0o777,0o600)
 

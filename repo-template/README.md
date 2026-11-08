@@ -26,6 +26,11 @@ are not supported. Operator diagnostics stay restricted to the server.
 5. Retrieve sources with `/cvpilot master get label:<label>` and inspect progress
    with `/cvpilot status`.
 
+Tailoring uses all current uploaded resumes and supported profile facts. It
+changes only the application files; masters and the profile remain unchanged.
+An empty or outdated profile does not block tailoring. Use `/cvpilot profile sync`
+to rebuild the profile separately from the current masters.
+
 Each request keeps its permanent job ID (for example, `#20`) and also shows
 its current position among all pending CVPilot jobs, the number ahead of it,
 and total running/waiting work. Running jobs count ahead of waiting jobs;
