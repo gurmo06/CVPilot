@@ -119,6 +119,13 @@ def detail(root, snapshot):
     if stage:add('Progress' if state in ('queued','running') else 'Last checkpoint',stage+f'\nUpdated: {checkpoint.get("updated_at")} UTC')
     elif state=='queued':add('Progress','Waiting for the worker to claim this job.')
     elif state=='running':add('Progress','Worker is processing this job. No stage checkpoint is available for this older run.')
+    fit=private_json(root,'job-refinements',job)
+    if fit.get('job_id')==jid and fit.get('kind')=='tailor':
+        measurement=fit.get('best_metrics') or fit.get('metrics') or {}
+        add('Page fit',f'Draft/refinement round: {fit.get("round",0)}. State: {fit.get("status","unknown")}.\n'
+            f'Best PDF: {measurement.get("pages","?")} page(s). Overflow rows: {measurement.get("overflow_lines",0)}.\n'
+            f'Current target: recover {measurement.get("target_lines",0)} rendered line-equivalents; fonts and layout remain fixed.'+
+            ('\n'+fit['feedback'] if fit.get('feedback') else ''))
     if job.get('error'):
         error=clean(job['error'])
         report_lines.extend(['Error:',error,''])

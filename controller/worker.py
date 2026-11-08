@@ -618,6 +618,33 @@ TASK: The user explicitly enabled and requested editing their master resume role
 TASK: Update ONLY profile/MASTER_PROFILE.md and profile/profile_sources.json. {specific}. Review ALL master resume .tex or PDF inputs. Add confirmed factual information found in any master and provenance references to source paths. Information absent from one master should be preserved if still in another or user-confirmed; removal from every master alone does not negate user-confirmed information. Never invent facts. Do not edit masters or commit/push.'''
     raise ValueError('Unsupported agent task')
 
+def agent_completion(job,prompt,report_path,*,timeout=900,suffix=''):
+    """One agent call with a private prompt/report and no hidden retry loop."""
+    from openclaw_cli import OpenClawError,json_response,retained_response
+    import profile_sync
+    uid=job['discord_id'];jid=job['id']
+    argv=['openclaw','agent','--agent',f'career-{uid}','--json','--session-key',f'agent:career-{uid}:cvpilot:job:{jid}'+suffix]
+    if job['kind']=='tailor':
+        # Let the Gateway terminate its own run before the outer process limit;
+        # OpenClaw reserves another 30 seconds for its final RPC response.
+        argv+=['--timeout',str(max(1,int(timeout)-35))]
+    try:
+        if job['kind'] in ('profile-sync','tailor'):
+            directory=ROOT/'job-prompts'/uid;directory.mkdir(parents=True,exist_ok=True,mode=0o700);directory.chmod(0o700)
+            with tempfile.NamedTemporaryFile(mode='w',encoding='utf-8',dir=directory,suffix='.txt') as message:
+                message.write(prompt);message.flush()
+                raw=run(argv+['--message-file',message.name],timeout=timeout)
+        else:raw=run(argv+['--message',prompt],timeout=timeout)
+    except OpenClawError as exc:
+        if exc.response:_write_intent(report_path,retained_response(exc.response))
+        raise
+    structured=json_response(raw)
+    if structured:_write_intent(report_path,retained_response(structured))
+    response=profile_sync.agent_response(raw)
+    _write_intent(report_path,response)
+    return response
+
+
 def latex_engine(tex):
     source=tex.read_text(encoding='utf-8')
     directive=re.search(r'^\s*%\s*!\s*tex\s+(?:ts-)?program\s*=\s*(pdflatex|xelatex|lualatex)\s*$',source,re.I|re.M)
@@ -649,23 +676,33 @@ def latex_failure(tex):
     return ''
 
 
-def compile_pdf(task, tex, *, require_one_page=True):
+def compile_pdf(task, tex, *, require_one_page=True, measure_layout=None):
     # Compile in a networkless container with limited privileges/resources.
     rel=tex.relative_to(task)
     folder=str(rel.parent)
     texname=rel.name
+    from page_refinement import metrics_entry
+    if measure_layout is None:
+        measure_layout=(len(rel.parts)==4 and rel.parts[0]=='applications' and re.fullmatch(r'\d{4}',rel.parts[1])
+                        and re.fullmatch(r'job-\d+',rel.parts[2]) and texname=='resume.tex')
+    entry=metrics_entry(tex) if measure_layout else tex
+    log=tex.with_suffix('.log')
+    if log.is_symlink():raise RuntimeError('Unsafe compiler log')
+    log.unlink(missing_ok=True)
     container=['docker','run','--rm','--network','none','--user',f'{os.getuid()}:{os.getgid()}',
           '--memory','1800m','--cpus','2',
           '--pids-limit','192','--security-opt','no-new-privileges','--cap-drop','ALL',
           '-e','HOME=/tmp','-v',f'{task}:/work:rw','-w',f'/work/{folder}',IMAGE]
     engine=latex_engine(tex)
     mode={'pdflatex':'pdf','xelatex':'xelatex','lualatex':'lualatex'}[engine]
-    cmds=container+['latexmk','-norc',f'-{mode}','-interaction=nonstopmode','-halt-on-error',
-          f'-{engine}={engine} -no-shell-escape %O %S',texname]
+    cmds=container+['latexmk','-norc','-g',f'-{mode}','-interaction=nonstopmode','-halt-on-error',
+          f'-{engine}={engine} -no-shell-escape %O %S',*(['-jobname='+tex.stem] if entry!=tex else []),entry.name]
     try:run(cmds,timeout=180)
     except RuntimeError as exc:
         detail=latex_failure(tex)
-        if detail:raise RuntimeError(f'{engine}: {detail}') from exc
+        if detail:
+            from generated_tex import TexCompileError
+            raise TexCompileError(f'{engine}: {detail}') from exc
         raise
     pdf=tex.with_suffix('.pdf')
     if pdf.is_symlink() or not pdf.is_file():raise RuntimeError(f'PDF not generated for {texname}')
@@ -673,7 +710,9 @@ def compile_pdf(task, tex, *, require_one_page=True):
     pages=run(container+['pdfinfo',pdf.name],timeout=20)
     m=re.search(r'^Pages:\s*(\d+)\s*$',pages,re.MULTILINE)
     if not m or int(m.group(1))<1:raise RuntimeError(f'Cannot validate PDF page count for {texname}')
-    if require_one_page and int(m.group(1))!=1: raise RuntimeError(f'PDF must be exactly one page: {pdf} ({m.group(1)} pages)')
+    if require_one_page and int(m.group(1))!=1:
+        from generated_tex import PageCountError
+        raise PageCountError(pdf,int(m.group(1)))
     return pdf
 
 
@@ -881,27 +920,13 @@ def run_resume_job(job,store,*,reuse_saved_response=False):
         posting=job_posting.fetch(data['url'])
         if posting:_write_intent(ROOT/'job-postings'/uid/f'{jid}.json',posting)
     prompt=agent_prompt(job,task,posting,resume_inputs)
-    # Trusted worker invokes OpenClaw agent, whose filesystem tools are sandboxed.
-    argv=['openclaw','agent','--agent',f'career-{uid}','--json','--session-key',f'agent:career-{uid}:cvpilot:job:{jid}']
+    deadline=time.monotonic()+900
     progress(store.path.parent,job,'Reading retained agent response' if reuse_saved_response else 'Waiting for the agent to process sources and produce output (up to 15 minutes)')
-    from openclaw_cli import OpenClawError,json_response,retained_response
-    try:
-        if reuse_saved_response:
-            raw=saved_report.read_text()
-        elif kind in ('profile-sync','tailor'):
-            directory=ROOT/'job-prompts'/uid;directory.mkdir(parents=True,exist_ok=True,mode=0o700);directory.chmod(0o700)
-            with tempfile.NamedTemporaryFile(mode='w',encoding='utf-8',dir=directory,suffix='.txt') as message:
-                message.write(prompt);message.flush()
-                raw=run(argv+['--message-file',message.name],timeout=900)
-        else:raw=run(argv+['--message',prompt],timeout=900)
-    except OpenClawError as exc:
-        if exc.response:_write_intent(saved_report,retained_response(exc.response))
-        raise
-    structured=json_response(raw)
-    if structured:_write_intent(saved_report,retained_response(structured))
     import profile_sync
-    response=profile_sync.agent_response(raw)
-    _write_intent(ROOT/'job-reports'/uid/f'{jid}.json',response)
+    if reuse_saved_response:
+        response=profile_sync.agent_response(saved_report.read_text())
+    else:
+        response=agent_completion(job,prompt,saved_report)
     progress(store.path.parent,job,'Checking required agent output and source provenance')
     validate_agent_task(uid,jid)
     if kind=='profile-sync':
@@ -912,9 +937,8 @@ def run_resume_job(job,store,*,reuse_saved_response=False):
         tailoring.apply(task,response,jid,data['url'],resume_inputs,KIT/'repo-template/profile/MASTER_PROFILE.md')
         target=task/'applications'/str(time.gmtime().tm_year)/f'job-{jid}'/'resume.tex'
         if not target.is_file():raise RuntimeError(missing_output(target.relative_to(task),response))
-        from generated_tex import compile_generated
-        progress(store.path.parent,job,'Compiling the tailored TeX and validating the one-page PDF')
-        compile_generated(compile_pdf,task,target)
+        import page_refinement
+        page_fit=page_refinement.fit(w,job,store,task,target,resume_inputs,posting,response,deadline,allow_model=not reuse_saved_response)
     if kind=='master-edit':
         progress(store.path.parent,job,'Compiling the edited master and validating the PDF')
         masters=list((task/'master-resumes'/data['role']).rglob('*.tex'))
@@ -962,6 +986,8 @@ def run_resume_job(job,store,*,reuse_saved_response=False):
         note=(f'Profile sync complete. {verified_facts} verified facts recorded from {len(sync_inputs)} source files. Changes committed to main.'
               if changed else 'Profile and source records are already current. No new commit was created.')
     progress(store.path.parent,job,'Committing validated changes and publishing to main')
+    if kind=='tailor' and page_fit['rounds']:
+        note+=f" Page fit completed after {page_fit['rounds']} measured refinement round(s); font sizes and layout were preserved."
     return main_commits.publish(w,job,store,{'note':note,'artifacts':artifacts})
 
 

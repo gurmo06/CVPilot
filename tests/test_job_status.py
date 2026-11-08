@@ -43,6 +43,17 @@ class JobStatusTests(unittest.TestCase):
         for private in ('PRIVATE SESSION','PRIVATE SYSTEM PROMPT','secret=hidden','fragment'):self.assertNotIn(private,text)
         self.assertIn('Agent did not create',detail['report'])
 
+    def test_page_fit_shows_retained_best_target_after_an_over_shortened_proposal(self):
+        jid=self.failed('A refinement was too short')
+        folder=self.root/'job-refinements'/UID;folder.mkdir(parents=True)
+        (folder/f'{jid}.json').write_text(json.dumps({'job_id':jid,'kind':'tailor','round':2,'status':'over_shortened',
+            'metrics':{'pages':1,'target_lines':0},'best_metrics':{'pages':2,'overflow_lines':5,'target_lines':4},
+            'feedback':'Rejected 10-line cut for a 4-line target.'}))
+        result=self.call();field=next(item for item in result['status_detail']['fields'] if item['name']=='Page fit')
+        self.assertIn('Best PDF: 2 page(s)',field['value'])
+        self.assertIn('recover 4 rendered line-equivalents',field['value'])
+        self.assertIn('Rejected 10-line cut',field['value'])
+
     def test_error_longer_than_old_120_character_limit_is_fully_preserved(self):
         error='xelatex failed:\n'+('Specific source-line detail.\n'*100)+'LAST LINE'
         jid=self.failed(error);result=self.call(job_id=jid)

@@ -24,3 +24,13 @@ Write raw TeX with actual line breaks, not literal JSON escape sequences. Close
 macro bodies before percent comments. Escape text ampersands; use unescaped
 ampersands only for table alignment. The controller may retry compilation once
 after narrowly correcting generated syntax; validation still requires one page.
+
+For page-fit refinements, follow the worker's measured line-reduction target.
+It reports overflow rows, available first-page space and the net number of body
+line-equivalents to recover. Tighten only enough content to meet that target;
+preserve important facts and supported job keywords. Return the requested
+cvpilot-resume-body and cvpilot-notes blocks. The worker keeps the original
+preamble, font sizes, margins and spacing, recompiles, and measures again.
+Over-shortened or non-improving proposals are rejected. Refinement stops at one
+page or with an explicit stalled-progress/time/round-budget error; it does not
+silently shrink typography to force a fit.

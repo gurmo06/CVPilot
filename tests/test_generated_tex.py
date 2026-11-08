@@ -14,6 +14,20 @@ UID=fixtures.UID
 
 
 class GeneratedTexTests(unittest.TestCase):
+    def test_page_overflow_keeps_typed_measurement_without_pointless_syntax_retry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            task=Path(directory);tex=task/'resume.tex';tex.write_text(r'\documentclass{article}\begin{document}Content\end{document}')
+            compiler=mock.Mock(side_effect=generated_tex.PageCountError(tex.with_suffix('.pdf'),2))
+            with self.assertRaises(generated_tex.PageCountError) as failure:generated_tex.compile_generated(compiler,task,tex)
+            self.assertEqual(failure.exception.pages,2);compiler.assert_called_once()
+
+    def test_source_error_stays_distinct_from_infrastructure_after_cleanup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            task=Path(directory);tex=task/'resume.tex';tex.write_text(r'\newcommand{\sample}{text%}')
+            compiler=mock.Mock(side_effect=generated_tex.TexCompileError('Undefined control sequence'))
+            with self.assertRaises(generated_tex.TexCompileError):generated_tex.compile_generated(compiler,task,tex)
+            self.assertEqual(compiler.call_count,2)
+
     def test_uniform_double_escaping_restores_commands_symbols_and_row_breaks(self):
         original='\n'.join([r'\documentclass{article}',r'\begin{document}',
                             r'\textbf{Teaching}\\[2pt]',r'Results 30\% \& evidence',r'\end{document}'])

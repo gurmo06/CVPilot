@@ -2,6 +2,16 @@
 import re
 
 
+class PageCountError(RuntimeError):
+    def __init__(self,pdf,pages):
+        self.pdf=pdf;self.pages=pages
+        super().__init__(f'PDF must be exactly one page: {pdf} ({pages} pages)')
+
+
+class TexCompileError(RuntimeError):
+    """A source/font error, rather than unavailable compiler infrastructure."""
+
+
 def decode_backslashes(text):
     """Remove one uniform escape layer from an otherwise raw generated document.
 
@@ -100,9 +110,10 @@ def compile_generated(compile_pdf, task, tex):
         if log.is_file():
             with log.open(encoding='utf-8',errors='replace') as stream:
                 if 'Missing character:' in stream.read(2*1024*1024):
-                    raise RuntimeError('Generated PDF has missing font glyphs; the draft was retained and no changes were published.')
+                    raise TexCompileError('Generated PDF has missing font glyphs; the draft was retained and no changes were published.')
         return pdf
     try:return checked()
+    except PageCountError:raise
     except RuntimeError as original_error:
         if tex.is_symlink() or not tex.is_file():raise
         original=tex.read_text(encoding='utf-8')
@@ -110,6 +121,9 @@ def compile_generated(compile_pdf, task, tex):
         if repaired==original:raise
         tex.write_text(repaired,encoding='utf-8')
         try:return checked()
+        except PageCountError:raise
+        except TexCompileError as failed:
+            raise TexCompileError('Generated TeX still failed after one syntax cleanup. '+str(failed)) from original_error
         except RuntimeError as failed:
             raise RuntimeError('Generated TeX still failed validation after one syntax cleanup. '
                 'The draft is retained; no changes were published. '+str(failed)) from original_error
