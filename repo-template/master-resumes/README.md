@@ -40,5 +40,10 @@ GitHub uploads are also supported at `master-resumes/<label>/resume.pdf` and
 `resume.tex` on `main`. Resume sources may be multiple pages. Tailored output is
 validated as a one-page PDF. PDF-only sources are supported with a clean new
 layout; a matching TeX source is best for preserving an existing layout.
+Tailoring preserves the closest master's useful context and makes minimal
+necessary edits. Page-fit revisions target wrapped lines through rewording,
+retaining bullets, sections and achievements. Underfilled drafts may restore
+relevant source details; the bot must not pad sparse sources or delete large
+amounts of context just to obtain a one-page count.
 Automatic upload compilation applies to the Discord upload command; editing
 files directly on GitHub does not trigger an upload job.

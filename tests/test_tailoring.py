@@ -12,6 +12,7 @@ import test_resume_attachments as workflow
 import profile_sync
 import tailoring
 import worker
+from resume_quality import POLICY
 
 TEX=r'\documentclass{article}\begin{document}Verified teaching experience\end{document}'
 URL='https://jobs.example/teaching'
@@ -67,6 +68,8 @@ class TailoringTests(unittest.TestCase):
         self.assertIn('profile is read-only',prompt);self.assertIn('two fenced blocks',prompt)
         self.assertIn('citations match the supplied current source hashes',prompt)
         self.assertNotIn('cvpilot-profile-json',prompt)
+        self.assertIn(POLICY,prompt)
+        self.assertIn('Do not rewrite or shorten every bullet preemptively',prompt)
         with self.assertRaisesRegex(ValueError,'readable resume text'):tailoring.prompt(job,None,None)
 
     def test_template_text_is_literal_tex_instead_of_json_escaped(self):

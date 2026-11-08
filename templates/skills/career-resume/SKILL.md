@@ -7,8 +7,10 @@ For queued jobs with inline SOURCE DATA, all master resumes, original TeX layout
 profile facts and provenance are already supplied by the trusted worker. Do not
 browse sandbox directories or ask the user to supply those files again. Use
 supplied posting text when present; otherwise fetch the exact posting URL.
-Return the two fenced blocks requested by the worker: cvpilot-resume-tex and
-cvpilot-notes. During tailoring the profile and masters are read-only; do not
+For the initial draft return cvpilot-resume-tex (complete document) and
+cvpilot-notes. For a later refinement return cvpilot-resume-body (complete body
+only) and cvpilot-notes, as requested by that stage. During tailoring the
+profile and masters are read-only; do not
 return profile JSON. Use current master evidence directly even if the profile
 is empty or outdated. Use profile facts only when user-confirmed or cited to
 current source hashes; corroborate stale facts in current masters. Profile
@@ -27,14 +29,32 @@ of their formatting. Discord attachments are handled by the trusted controller.
 Write raw TeX with actual line breaks, not literal JSON escape sequences. Close
 macro bodies before percent comments. Escape text ampersands; use unescaped
 ampersands only for table alignment. The controller may retry compilation once
-after narrowly correcting generated syntax; validation still requires one page.
+after narrowly correcting generated syntax. The final output must be a readable,
+well-filled single page; do not aggressively cut the first draft to guarantee it.
+
+Follow the worker's shared RESUME QUALITY POLICY in both stages. Start with the
+closest master and preserve its unaffected wording, entries and formatting.
+Improve relevance using evidence, not a blanket rewrite. Use the whole usable
+page with supported meaningful detail and normal bottom breathing room. Keep
+action, scope/method and outcome/metrics together so bullets remain useful.
+Target short spillovers in wrapped bullets first: reword two lines into one or
+three into two when the meaning survives. Keep already concise bullets intact.
+Do not force every bullet onto one line, replace context with cryptic fragments,
+or infer qualifications from adjacent technologies. Explain initial substantive
+omissions/replacements and name the baseline in notes.
 
 For page-fit refinements, follow the worker's measured line-reduction target.
 It reports overflow rows, available first-page space and the net number of body
-line-equivalents to recover. Tighten only enough content to meet that target;
-preserve important facts and supported job keywords. Return the requested
+line-equivalents to recover. This is a wrap-reduction budget, not permission to
+delete bullets. Reword only enough to meet it, retaining all current bullets,
+sections, entries, dates, numeric achievements and important supported keywords.
+For an underfilled draft the worker instead gives a restoration budget: add back
+relevant source-supported context or omitted supporting bullets, without filler,
+invented claims or changing typography. Return the requested
 cvpilot-resume-body and cvpilot-notes blocks. The worker keeps the original
 preamble, font sizes, margins and spacing, recompiles, and measures again.
-Over-shortened or non-improving proposals are rejected. Refinement stops at one
-page or with an explicit stalled-progress/time/round-budget error; it does not
-silently shrink typography to force a fit.
+Deleted bullets/identities/metrics, excessive cuts and non-improving proposals
+are rejected. Refinement stops at a well-filled single page or an explicit
+stalled-progress/time/round-budget error; it does not shrink typography or
+publish a gutted resume merely because the page count is one. Sparse source
+resumes must not be padded with unrelated facts to fill a quota.

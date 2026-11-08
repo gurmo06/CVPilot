@@ -31,6 +31,16 @@ changes only the application files; masters and the profile remain unchanged.
 An empty or outdated profile does not block tailoring. Use `/cvpilot profile sync`
 to rebuild the profile separately from the current masters.
 
+Tailoring starts from the closest existing master and makes minimal necessary
+edits for the posting. The goal is a readable, well-filled page with supported
+accomplishments and their context intact. When text overflows, CVPilot measures
+the excess and first rewords wrapped bullets (for example, a short second-line
+spillover back onto one line). Refinement preserves bullets, entries, dates and
+metrics; it does not delete sections or shrink typography to force a fit.
+If a first draft leaves substantial unused space and sources contain omitted
+evidence, it requests relevant context back. Sparse sources are not padded with
+filler. A one-page count alone is not treated as proof of a good resume.
+
 Each request keeps its permanent job ID (for example, `#20`) and also shows
 its current position among all pending CVPilot jobs, the number ahead of it,
 and total running/waiting work. Running jobs count ahead of waiting jobs;

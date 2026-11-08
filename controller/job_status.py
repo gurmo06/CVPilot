@@ -122,9 +122,12 @@ def detail(root, snapshot):
     fit=private_json(root,'job-refinements',job)
     if fit.get('job_id')==jid and fit.get('kind')=='tailor':
         measurement=fit.get('best_metrics') or fit.get('metrics') or {}
+        target=(f'Restore about {measurement["fill_target_lines"]} rendered lines of source-supported context; the page is underfilled.'
+                if measurement.get('fill_target_lines') else
+                f'Recover {measurement.get("target_lines",0)} rendered wraps through rewording; preserve bullets and context.')
         add('Page fit',f'Draft/refinement round: {fit.get("round",0)}. State: {fit.get("status","unknown")}.\n'
             f'Best PDF: {measurement.get("pages","?")} page(s). Overflow rows: {measurement.get("overflow_lines",0)}.\n'
-            f'Current target: recover {measurement.get("target_lines",0)} rendered line-equivalents; fonts and layout remain fixed.'+
+            f'Current target: {target} Fonts and layout remain fixed.'+
             ('\n'+fit['feedback'] if fit.get('feedback') else ''))
     if job.get('error'):
         error=clean(job['error'])

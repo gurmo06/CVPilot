@@ -12,6 +12,7 @@ from test_tailoring import response,updated
 import generated_tex
 import page_refinement as fit
 import worker
+from resume_quality import POLICY
 
 UID=fixtures.UID
 TEX='\\documentclass[10pt]{article}\n\\begin{document}\nOriginal resume content.\n\\end{document}\n'
@@ -101,6 +102,10 @@ class MeasurementTests(unittest.TestCase):
         self.assertIn('cvpilot-resume-body',prompt);self.assertNotIn('cvpilot-profile-json',prompt)
         self.assertIn('```cvpilot-resume-body\n',prompt)
         self.assertIn('```cvpilot-notes\n',prompt)
+        self.assertIn(POLICY,prompt)
+        self.assertIn('Do not delete 5 bullets or source lines',prompt)
+        self.assertIn('second line has a short spillover',prompt)
+        self.assertNotIn('remove only the least job-relevant details',prompt)
 
     def test_rendered_line_map_uses_readable_unicode_outside_json_strings(self):
         measured=metrics();measured['rendered_lines']=['P1.L1: Teaching – training']
@@ -240,6 +245,54 @@ class RefinementLoopTests(unittest.TestCase):
         result=self.run_fit([None],[],[])
         self.assertEqual(result,{'rounds':0,'pages':1});self.worker.agent_completion.assert_not_called()
 
+    def richer_sources(self):
+        self.inputs={'documents':[{'path':'master-resumes/general/resume.tex',
+            'text':TEX.replace('Original resume content.',r'\item Original resume content. \item Supported source details.')} ]}
+
+    def one_page(self,footprint):
+        measured=metrics(1,footprint,0);measured['first_page_spare_pt']=720-footprint
+        return measured
+
+    def test_underfilled_first_draft_restores_context_until_page_is_well_filled(self):
+        self.richer_sources()
+        result=self.run_fit([None,None,None],[self.one_page(600),self.one_page(650),self.one_page(705)],
+                            [revision('Original resume content. Restored supported source details.'),
+                             revision('Original resume content. Restored supported source details and their verified results.')])
+        self.assertEqual(result['rounds'],2)
+        first,second=[call.args[1] for call in self.worker.agent_completion.call_args_list]
+        self.assertIn('RESTORE approximately 7 rendered',first)
+        self.assertIn('RESTORE approximately 3 rendered',second)
+        self.assertIn('Do not shorten it further',first)
+        record=json.loads((self.root/'job-refinements'/UID/'35.json').read_text())
+        self.assertEqual(record['status'],'fits');self.assertEqual(record['metrics']['fill_target_lines'],0)
+
+    def test_restoration_that_overflows_is_rejected_and_retries_from_the_fuller_best(self):
+        self.richer_sources()
+        result=self.run_fit([None,generated_tex.PageCountError(self.tex.with_suffix('.pdf'),2),None],
+                           [self.one_page(600),metrics(2,760,4),self.one_page(705)],
+                           [revision('Too much restored evidence.'),revision('Original resume content. Appropriate source-supported restoration.')])
+        self.assertEqual(result['rounds'],2)
+        second=self.worker.agent_completion.call_args_list[1].args[1]
+        self.assertIn('Restoring context overflowed',second);self.assertIn(TEX,second)
+        self.assertNotIn('Too much restored evidence.',self.tex.read_text())
+
+    def test_underfilled_draft_without_progress_fails_instead_of_publishing_one_page_success(self):
+        self.richer_sources()
+        with self.assertRaisesRegex(RuntimeError,'source-supported context restored'):
+            self.run_fit([None]*4,[self.one_page(600)]*4,[revision('Original resume content.')]*3)
+        self.assertEqual(self.tex.read_text(),TEX)
+
+    def test_saved_underfilled_draft_requires_no_unapproved_model_calls(self):
+        self.richer_sources()
+        with self.assertRaisesRegex(RuntimeError,'source-supported context restored'):
+            self.run_fit([None],[self.one_page(600)],[],allow_model=False)
+        self.worker.agent_completion.assert_not_called()
+
+    def test_well_filled_initial_draft_does_not_get_unnecessary_rewrites(self):
+        self.richer_sources()
+        self.assertEqual(self.run_fit([None],[self.one_page(705)],[]),{'rounds':0,'pages':1})
+        self.worker.agent_completion.assert_not_called()
+
     def test_missing_optional_notes_preserve_previous_notes_in_the_fitting_result(self):
         report={'final':'```cvpilot-resume-body\nConcise resume content.\n```'}
         self.run_fit([generated_tex.PageCountError(self.tex.with_suffix('.pdf'),2),None],
@@ -248,6 +301,34 @@ class RefinementLoopTests(unittest.TestCase):
 
 
 class RefinementWorkflowTests(unittest.TestCase):
+    def test_underfilled_one_page_first_draft_is_not_published_before_context_is_restored(self):
+        fixture=workflow.ResumeWorkflowTests('runTest');fixture.setUp();self.addCleanup(fixture.doCleanups)
+        short=r'\begin{itemize}\item Delivered verified classroom instruction.\end{itemize}'
+        fuller=short.replace(r'\end{itemize}',r'\item Designed supported lesson plans.\item Assessed verified learning outcomes.\end{itemize}')
+        master=TEX.replace('Original resume content.',fuller)
+        upload,_=fixture.upload(files=workflow.attachments(('cv.tex',master.encode()),('cv.pdf',workflow.PDF)))
+        worker.cleanup_completed(UID,upload['id'])
+        jid=fixture.store.enqueue(UID,'tailor',{'url':'https://jobs.example/teaching'});job=fixture.store.claim()
+        original=worker.run;prompts=[]
+        def agent(argv,**kwargs):
+            if argv[0]!='openclaw':return original(argv,**kwargs)
+            prompts.append(Path(argv[argv.index('--message-file')+1]).read_text())
+            return json.dumps(response(tex=TEX.replace('Original resume content.',short)) if len(prompts)==1 else revision(fuller))
+        def compiler(task,tex):
+            tex.with_suffix('.pdf').write_bytes(workflow.PDF);tex.with_suffix('.log').write_text('Current log')
+        first=metrics(1,600,0);first['first_page_spare_pt']=120
+        final=metrics(1,705,0);final['first_page_spare_pt']=15
+        with (mock.patch.object(worker,'run',side_effect=agent),mock.patch.object(worker,'compile_pdf',side_effect=compiler),
+              mock.patch.object(fit,'measure',side_effect=[first,final])):
+            result=worker.work(job,fixture.store)
+        self.assertEqual(len(prompts),2);self.assertIn('RESTORE approximately 7 rendered',prompts[1])
+        path=f'applications/{time.gmtime().tm_year}/job-{jid}/resume.tex'
+        published=fixture.git('-C',str(fixture.remote),'show','main:'+path)
+        self.assertEqual(published.count(r'\item'),3)
+        self.assertIn('supported lesson plans',published)
+        self.assertIn('verified learning outcomes',published)
+        self.assertIn('after 1 measured refinement',result['note'])
+
     def test_only_the_final_fitting_draft_is_published_via_normal_main_workflow(self):
         fixture=workflow.ResumeWorkflowTests('runTest');fixture.setUp();self.addCleanup(fixture.doCleanups)
         upload,_=fixture.upload();worker.cleanup_completed(UID,upload['id'])
