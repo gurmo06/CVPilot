@@ -3,6 +3,8 @@
 Use any resume labels you find useful. `general` is the default, not a required
 profession. Labels use lowercase letters, numbers and hyphens (up to 40
 characters), starting with a letter. Existing labels remain usable.
+Uploading under another label removes the untouched `general` starter folder.
+A `general` folder containing a resume or customized files is kept.
 
 Upload from Discord:
 `/cvpilot master upload file:<PDF or TeX> label:<your-label> companion:<optional matching file>`

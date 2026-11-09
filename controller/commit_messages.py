@@ -72,7 +72,7 @@ def build(w, uid, repo, kind, jid, payload=None, draft=None):
         # A PDF-only replacement may also delete an old TeX file. Describe the
         # uploaded formats in the title; list the TeX removal in the body.
         formats=resume_formats([('',item.get('path','')) for item in draft.get('artifacts',[])]) or formats
-        replaced=any(status!='A' for status,_ in changes)
+        replaced=any(status!='A' and path.startswith(f'master-resumes/{label}/') for status,path in changes)
         summary=f'{"Replace" if replaced else "Upload"} master {label}'
         if formats:summary+=f' ({formats})'
     elif kind=='master-edit':summary=f'Edit master {label}'+(f' ({formats})' if formats else '')

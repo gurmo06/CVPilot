@@ -131,6 +131,80 @@ class ResumeWorkflowTests(unittest.TestCase):
         self.store.finish(jid,'done',result)
         return self.store.job(jid),result
 
+    def seed_general(self,extra_files=None,readme=None):
+        directory=self.seed/'master-resumes/general';directory.mkdir(parents=True)
+        template=(worker.KIT/'repo-template/master-resumes/general/README.md').read_bytes()
+        (directory/'README.md').write_bytes(template if readme is None else readme)
+        for name,data in (extra_files or {}).items():
+            target=directory/name;target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(data)
+        self.git('-C',str(self.seed),'add','-f','master-resumes/general')
+        self.git('-C',str(self.seed),'commit','-m','Seed general folder')
+        self.git('-C',str(self.seed),'push','origin','main')
+        return self.git('-C',str(self.seed),'rev-parse','HEAD')
+
+    def test_named_upload_removes_only_general_placeholder_in_the_upload_commit(self):
+        before=self.seed_general()
+        _,result=self.upload('swe')
+        self.assertEqual(self.git('-C',str(self.remote),'ls-tree','main','--','master-resumes/general'),'')
+        self.assertEqual(self.git('-C',str(self.remote),'rev-parse','main^'),before)
+        self.assertEqual(self.git('-C',str(self.remote),'ls-tree','--name-only','main:master-resumes'),'swe')
+        self.assertEqual(resumes.validate_files(self.call('master',{'operation':'get','label':'swe'})['attachments']),
+                         {'resume.pdf':PDF,'resume.tex':TEX})
+        message=self.git('-C',str(self.remote),'show','-s','--format=%B',result['commit'])
+        self.assertIn('Upload master swe (PDF + TeX)',message.splitlines()[0])
+        self.assertIn('Deleted: master-resumes/general/README.md',message)
+        self.assertTrue(self.git('-C',str(self.remote),'show',before+':master-resumes/general/README.md'))
+        self.upload('teaching')
+        self.assertEqual(self.git('-C',str(self.remote),'ls-tree','--name-only','main:master-resumes'),'swe\nteaching')
+
+    def test_named_upload_preserves_an_uploaded_general_resume(self):
+        self.seed_general();self.upload('general');self.upload('swe')
+        self.assertEqual(resumes.validate_files(self.call('master',{'operation':'get','label':'general'})['attachments']),
+                         {'resume.pdf':PDF,'resume.tex':TEX})
+        self.assertTrue(self.git('-C',str(self.remote),'show','main:master-resumes/general/README.md'))
+
+    def test_named_upload_preserves_custom_general_readme(self):
+        self.seed_general(readme=b'My career notes and plans\n');self.upload('swe')
+        self.assertEqual(self.git('-C',str(self.remote),'show','main:master-resumes/general/README.md'),
+                         'My career notes and plans')
+
+    def test_named_upload_preserves_general_companions_and_nested_files(self):
+        self.seed_general({'notes.txt':b'Career notes','archive/resume.tex':TEX});self.upload('swe')
+        self.assertEqual(self.git('-C',str(self.remote),'show','main:master-resumes/general/notes.txt'),'Career notes')
+        self.assertEqual(self.git('-C',str(self.remote),'show','main:master-resumes/general/archive/resume.tex'),TEX.decode())
+
+    def test_default_upload_keeps_the_general_label(self):
+        self.seed_general();self.upload()
+        self.assertEqual(self.git('-C',str(self.remote),'ls-tree','--name-only','main:master-resumes'),'general')
+        self.assertTrue(self.git('-C',str(self.remote),'show','main:master-resumes/general/README.md'))
+
+    def test_failed_named_upload_keeps_general_placeholder_unpublished(self):
+        before=self.seed_general()
+        self.call('master',{'operation':'upload','label':'swe','files':attachments(('cv.tex',TEX))})
+        job=self.store.claim()
+        with mock.patch.object(worker,'compile_pdf',side_effect=RuntimeError('Missing package')):
+            with self.assertRaisesRegex(RuntimeError,'Master TeX compilation failed'):
+                worker.run_upload_job(job,self.store)
+        self.assertEqual(self.git('-C',str(self.remote),'rev-parse','main'),before)
+        self.assertTrue(self.git('-C',str(self.remote),'show','main:master-resumes/general/README.md'))
+        self.assertEqual(self.git('-C',str(self.remote),'ls-tree','main','--','master-resumes/swe'),'')
+
+    def test_named_upload_cleanup_retry_reuses_commit_after_push_failure(self):
+        self.seed_general()
+        self.call('master',{'operation':'upload','label':'swe','files':attachments(('cv.pdf',PDF))})
+        job=self.store.claim();original=worker.run_git;attempts=[]
+        def push_fails_once(uid,directory,*args,**kwargs):
+            if args[0]=='push' and not attempts:
+                attempts.append(True);raise RuntimeError('temporary push failure')
+            return original(uid,directory,*args,**kwargs)
+        with mock.patch.object(worker,'run_git',side_effect=push_fails_once):
+            with self.assertRaisesRegex(RuntimeError,'push failure'):worker.run_upload_job(job,self.store)
+            commit=self.git('-C',str(worker.gitworktree(UID,job['id'])),'rev-parse','HEAD')
+            self.store.recover();again=self.store.claim()
+            result=worker.run_upload_job(again,self.store)
+        self.assertEqual(result['commit'],commit)
+        self.assertEqual(self.git('-C',str(self.remote),'ls-tree','main','--','master-resumes/general'),'')
+
     def test_upload_commits_to_main_immediately_usable_and_downloadable(self):
         job,result=self.upload('healthcare')
         self.assertEqual(self.git('-C',str(self.remote),'rev-parse','main'),result['commit'])

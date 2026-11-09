@@ -812,6 +812,16 @@ def run_upload_job(job, store):
             target.write_bytes(files[name]);changed_paths.append(f'master-resumes/{role}/{name}')
         elif target.exists():
             target.unlink();changed_paths.append(f'master-resumes/{role}/{name}')
+    if role!='general':
+        general=trusted/'master-resumes/general'
+        readme=general/'README.md'
+        template=KIT/'repo-template/master-resumes/general/README.md'
+        # Remove only the untouched starter folder, never a source resume or
+        # user-authored notes. Publish this cleanup atomically with the upload.
+        if (general.is_dir() and list(general.iterdir())==[readme]
+                and readme.is_file() and readme.read_bytes()==template.read_bytes()):
+            readme.unlink();general.rmdir()
+            changed_paths.append('master-resumes/general/README.md')
     run_git(uid,trusted,'add','-f','-A','--',*changed_paths)
     return main_commits.publish(w,job,store,{
             'note':f'Resume saved under {role} and ready for tailoring. '+('TeX compiled to PDF. ' if (inbox_path(ROOT,uid,payload['upload_id'])/'compiled.json').exists() else '')+f'Use /cvpilot master get label:{role} to download it. Earlier versions remain in Git history.',
