@@ -1,12 +1,11 @@
 import json, os, re, socketserver, threading, time, secrets, hmac
 from pathlib import Path
-from store import Store
 from resumes import label, stage_upload, MAX_PACKET_BYTES
 from queue_status import acknowledgement, status
 
 UID_RE=re.compile(r'^[0-9]{16,22}$')
 USERNAME_RE=re.compile(r'^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$')
-ALLOWED={'init','repo','settings','status','tailor','continue','master','profile','answer','download','reset','history','revert','master-delete','application-delete'}
+ALLOWED={'init','repo','settings','status','tailor','continue','master','profile','answer','download','reset','history','revert','master-delete','application-delete','profile-fact'}
 
 RESET_CONFIRM_TTL=120
 _RESET_CONFIRMATIONS={}
@@ -42,7 +41,7 @@ def reset_request(uid, args, user, store):
         return acknowledgement(store,uid,jid,f'Repository reset queued as job #{jid}. Check /cvpilot status. Other resume actions are blocked until it finishes.')
 
 
-def process(req, store):
+def _process(req, store):
     uid=str(req.get('sender_id',''))
     if not UID_RE.fullmatch(uid): raise ValueError('Authenticated Discord sender ID required')
     action=req.get('action')
@@ -74,6 +73,9 @@ def process(req, store):
         jid=store.enqueue(uid,'init',{'github_username':username})
         return acknowledgement(store,uid,jid,f'Initialization queued as job #{jid}. `/cvpilot status` shows progress.')
     if not user or not user.get('repo'): raise ValueError('Please initialize with /cvpilot init first')
+    if action=='profile-fact':
+        from qualifications import request
+        return request(uid,args,user,store,standalone=True)
     if action=='reset':return reset_request(uid,args,user,store)
     if store.reset_blocked(uid):raise ValueError('Repository reset is pending or incomplete. Check /cvpilot status and retry /cvpilot reset if it failed.')
     if action=='history':
@@ -136,8 +138,8 @@ def process(req, store):
         if op=='edit':
             detail=args.get('instructions','')
             if len(detail)<5 or len(detail)>2500: raise ValueError('Supply specific profile facts')
-            jid=store.enqueue(uid,'profile-edit',{'instructions':detail})
-            return acknowledgement(store,uid,jid,f'Profile update queued as #{jid}. Unverified additions will require confirmation.')
+            from qualifications import request
+            return request(uid,{'operation':'prepare','details':detail},user,store,standalone=True)
         raise ValueError('Usage: /cvpilot profile show | sync | edit instructions:TEXT')
     if action=='answer':
         from qualifications import request
@@ -146,6 +148,14 @@ def process(req, store):
         from qualifications import continue_job
         return continue_job(uid,args.get('job_id'),store)
     raise ValueError('Unsupported operation')
+
+def process(req, store):
+    uid=str(req.get('sender_id',''))
+    if not UID_RE.fullmatch(uid):raise ValueError('Authenticated Discord sender ID required')
+    if not isinstance(req.get('args') or {},dict):raise ValueError('Invalid arguments')
+    from conversation.runtime import command
+    return command(req,store,_process)
+
 
 class UnixHandler(socketserver.StreamRequestHandler):
     def handle(self):
@@ -169,5 +179,5 @@ def serve(socket_path,store,shutdown=None):
     except FileNotFoundError:pass
     s=UnixServer(str(p),UnixHandler);s.store=store
     os.chmod(p,0o600)
-    if shutdown: shutdown.append(s)
+    if shutdown is not None: shutdown.append(s)
     s.serve_forever(poll_interval=.3)

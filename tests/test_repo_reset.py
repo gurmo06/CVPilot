@@ -49,7 +49,7 @@ class ConfirmationTests(unittest.TestCase):
         self.assertIn('queued as job #1',result['text'])
         job=self.store.claim()
         self.assertEqual(job['kind'],'reset')
-        self.assertEqual(json.loads(job['payload']),{'repo':'CV-Pilot/cvpilot-'+UID,'confirmed':True})
+        self.assertEqual({k:v for k,v in json.loads(job['payload']).items() if k!='_conversation'},{'repo':'CV-Pilot/cvpilot-'+UID,'confirmed':True})
         with self.assertRaises(ValueError):self.call('confirm',token=token,confirmation='RESET')
 
     def test_cancel_and_expiry_never_queue_reset(self):
@@ -93,14 +93,17 @@ class ConfirmationTests(unittest.TestCase):
         token=self.call()['confirmation_token'];self.call('confirm',token=token,confirmation='RESET')
         reset=self.store.claim();self.store.finish(reset['id'],'done',{'reset':True})
         self.assertEqual(self.store.latest_uploads(UID),{})
-        self.assertIsNone(self.store.latest_download(UID))
-        self.assertEqual(self.store.latest_download(OTHER),other)
+        with self.assertRaisesRegex(ValueError,'No downloadable resume yet'):
+            worker.download_job(UID,None,self.store)
+        with mock.patch.object(worker,'artifact_files',return_value=[('resume.pdf',fixtures.PDF)]):
+            self.assertIn(f'job #{other}',worker.download_job(OTHER,None,self.store)['text'])
         self.assertEqual(self.store.job(old)['state'],'done')
         with self.assertRaisesRegex(ValueError,'before your last'):
             worker.download_job(UID,old,self.store)
         fresh=self.store.enqueue(UID,'master-upload',{})
         self.store.finish(fresh,'done',{'label':'general','artifacts':[{'path':'master-resumes/general/resume.pdf'}]})
-        self.assertEqual(self.store.latest_download(UID),fresh)
+        with mock.patch.object(worker,'artifact_files',return_value=[('resume.pdf',fixtures.PDF)]):
+            self.assertIn(f'job #{fresh}',worker.download_job(UID,None,self.store)['text'])
 
 
 class ResetWorkflowTests(unittest.TestCase):
@@ -160,7 +163,8 @@ class ResetWorkflowTests(unittest.TestCase):
         self.assertEqual(self.key.read_text(),'PRESERVE PRIVATE KEY')
         self.assertEqual((self.foreign/'private.txt').read_text(),'OTHER USER DATA')
         self.assertEqual(self.store.latest_uploads(UID),{})
-        self.assertIsNone(self.store.latest_download(UID))
+        with self.assertRaisesRegex(ValueError,'No downloadable resume yet'):
+            worker.download_job(UID,None,self.store)
         self.assertEqual(self.store.job(uploaded['id'])['state'],'done')
         backups=self.state/'reset-backups'/UID/str(job['id'])
         self.assertTrue((backups/'sandbox-tasks/901/README.md').is_file())

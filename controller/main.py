@@ -19,5 +19,9 @@ def handle(*a):
 signal.signal(signal.SIGTERM,handle)
 signal.signal(signal.SIGINT,handle)
 threading.Thread(target=forever,args=(store,stop),daemon=True).start()
+from conversation.runtime import forever as conversation_forever
+from conversation.storage import housekeeping
+threading.Thread(target=housekeeping,args=(path,stop),daemon=True).start()
+threading.Thread(target=conversation_forever,args=(store,stop),daemon=True).start()
 print('CVPilot controller online',flush=True)
 serve(path/'controller.sock',store,servers)

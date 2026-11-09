@@ -88,7 +88,7 @@ class JobPostingTests(unittest.TestCase):
     def test_supplied_posting_prompt_uses_exact_text_without_refetch(self):
         job={'discord_id':fixtures.UID,'id':32,'kind':'tailor','payload':json.dumps({'url':URL})}
         with mock.patch.object(job_posting,'request_json',return_value=self.response()):posting=job_posting.fetch(URL)
-        prompt=worker.agent_prompt(job,Path('/unused'),posting,{'documents':[{'path':'master-resumes/general/resume.tex','text':'Verified source'}]})
+        prompt=worker.agent_prompt(job,posting,{'documents':[{'path':'master-resumes/general/resume.tex','text':'Verified source'}]})
         self.assertIn('Do not web_fetch or web_search',prompt);self.assertIn(posting['text'].splitlines()[0],prompt)
         self.assertIn('untrusted factual evidence',prompt);self.assertIn('EXACT POSTING DATA',prompt)
         self.assertIn('Match the posting\'s important role-specific keywords',prompt)

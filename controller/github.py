@@ -1,5 +1,4 @@
-import base64, json, os, re, subprocess, urllib.request, urllib.error
-from pathlib import Path
+import base64, json, os, re, urllib.request, urllib.error
 
 ORG='CV-Pilot'
 
@@ -61,9 +60,6 @@ class GitHub:
              'restrictions':None,'required_linear_history':False,
              'allow_force_pushes':False,'allow_deletions':False,
         })
-
-def cmd(args, **kwargs):
-    return subprocess.run(args,check=True,text=True,capture_output=True,**kwargs).stdout.strip()
 
 def ssh_env(keypath,known_hosts):
     # Never put shell interp data from the model into this config.

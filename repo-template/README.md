@@ -191,3 +191,33 @@ If the profile and sources are already current, the result says no new commit
 was created and links to main. An agent that cannot read or update the files,
 returns an error, or leaves only the starter profile cannot report a successful
 sync. Fix the reported blocker and submit a fresh sync.
+
+## Conversation and detailed profile
+
+DM CVPilot or mention it in the designated server channel. Chat and slash
+commands share one private conversation per user; file operations use the same
+validated controller and commits to main. Chat responses and files arrive by DM.
+Commands keep their existing confirmation previews. In chat, type the exact
+confirmation word after the preview; the model cannot confirm for you.
+
+`/cvpilot context operation:show` displays usage. Each user starts with a 24,000
+conservative token budget (UTF-8 byte upper bound for conversation history,
+separate from system/source prompt overhead). At the limit, choose
+`operation:compact` or `operation:wipe`. Compaction may omit detail and reduce
+accuracy; original transcripts remain archived privately. A wipe starts a fresh
+active generation. Both preserve the master profile, resumes and Git history.
+Idle conversation working sets leave CVPilot's RAM cache after five minutes and
+reload from private SQLite on activity. This does not promise eviction of model
+weights, provider KV caches or the operating system's disk cache.
+
+Owner diagnostics in the configured admin channel include `/openclaw contexts`
+with optional `user_id` and `limit`. It lists residency, limits, usage and pending
+chat turns; an explicit target and limit update only that user's context budget.
+
+The master profile is a detailed evidence database, not a shortened resume.
+Profile sync extracts all source documents in bounded passes, keeps verbatim
+evidence and full extracted source text, and preserves historical and confirmed
+records. It never reduces the profile to satisfy a resume page limit. User facts
+from chat must be reviewed and confirmed before being saved. Tailoring retrieves
+relevant records and keeps the profile read-only. Source text and older context
+archives remain private; the public sync script copies source code only.

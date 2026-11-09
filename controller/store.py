@@ -41,6 +41,12 @@ class Store:
             c.close()
     def enqueue(self, uid, kind, payload):
         import json
+        from conversation import get
+        contexts=get(self.path.parent)
+        snapshot=contexts.snapshot(uid)
+        payload=dict(payload)
+        payload['_conversation']={'generation':snapshot['generation'],
+                                  'through':snapshot['events'][-1]['id'] if snapshot['events'] else 0}
         with self.tx() as c:
             if kind in ('reset','revert','master-delete','application-delete'):
                 if c.execute("SELECT 1 FROM jobs WHERE discord_id=? AND state IN ('queued','running') LIMIT 1",(uid,)).fetchone():
@@ -61,11 +67,16 @@ class Store:
         with self.tx() as c:
             c.execute('UPDATE jobs SET state=?,result=?,error=?,finished_at=CURRENT_TIMESTAMP WHERE id=?',
                 (state,json.dumps(result) if result is not None else None,str(error)[:3000] if error else None,jid))
+        from conversation.runtime import record_result
+        try:record_result(self,self.job(jid),state,result,error)
+        except Exception as exc:print(f'CVPilot conversation history warning for job {jid}: {type(exc).__name__}',flush=True)
     def recover(self):
         with self.tx() as c:
             c.execute("UPDATE jobs SET state='queued',started_at=NULL WHERE state='running'")
     def resume_tailor(self,uid,jid,signature):
         import json
+        from conversation import get
+        snapshot=get(self.path.parent).snapshot(uid)
         with self.tx() as c:
             row=c.execute('SELECT * FROM jobs WHERE id=? AND discord_id=?',(jid,uid)).fetchone()
             if not row or row['kind']!='tailor' or row['state']!='needs-input':
@@ -75,6 +86,7 @@ class Store:
             if c.execute("SELECT 1 FROM jobs WHERE discord_id=? AND state IN ('queued','running')",(uid,)).fetchone():
                 raise ValueError('Wait for your queued/running jobs, including profile saves, before continuing.')
             data=json.loads(row['payload']);data['accepted_review']=signature
+            data['_conversation']={'generation':snapshot['generation'],'through':snapshot['events'][-1]['id'] if snapshot['events'] else 0}
             c.execute("UPDATE jobs SET state='queued',payload=?,started_at=NULL,finished_at=NULL,error=NULL,result=NULL WHERE id=?",(json.dumps(data),jid))
     def user(self, uid):
         with closing(self.connection()) as c:
@@ -173,12 +185,6 @@ class Store:
         import json
         return {json.loads(row['result'] or '{}').get('deleted_directory') for row in self.download_jobs(uid)
                 if row['kind'] in ('master-delete','application-delete')} - {None}
-    def latest_download(self, uid):
-        import json
-        with closing(self.connection()) as c:
-            rows=c.execute("SELECT id,result FROM jobs WHERE discord_id=? AND state='done' AND id>(SELECT COALESCE(MAX(id),0) FROM jobs WHERE discord_id=? AND kind='reset' AND state='done') ORDER BY id DESC",(uid,uid)).fetchall()
-        return next((row['id'] for row in rows if json.loads(row['result'] or '{}').get('artifacts')),None)
-
     def reset_cutoff(self, uid):
         with closing(self.connection()) as c:
             return c.execute("SELECT COALESCE(MAX(id),0) FROM jobs WHERE discord_id=? AND kind='reset' AND state='done'",(uid,)).fetchone()[0]

@@ -1,6 +1,5 @@
 """Measure actual PDF overflow, then revise content within a concrete line budget."""
 from collections import Counter
-import hashlib
 import json
 import math
 import os
@@ -118,7 +117,7 @@ def layout_calls(body):
     body=_masked(body);result=Counter()
     pattern=re.compile(r'\\([A-Za-z@]+|\\)(?:\*)?')
     for match in pattern.finditer(body):
-        name=match[1];pos=match.end();tail=body[pos:]
+        name=match[1];pos=match.end()
         if name!='begin' and name not in LAYOUT_NAMES and name!='\\':continue
         for _ in range(3):
             while pos<len(body) and body[pos].isspace():pos+=1
@@ -250,7 +249,7 @@ def fit(w,job,store,task,tex,inputs,posting,initial_response,deadline,*,allow_mo
         return (f'about {restore} rendered lines of source-supported context restored' if restore
                 else f'{metrics["target_lines"]} rendered wraps recovered through rewording')
     try:
-        pdf=compile_generated(w.compile_pdf,task,tex)
+        compile_generated(w.compile_pdf,task,tex)
     except PageCountError as overflow:
         metrics=measure(w,task,tex)
         if metrics['pages']!=overflow.pages:raise ValueError('PDF page count and layout measurement disagree; refusing blind refinement')

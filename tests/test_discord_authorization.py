@@ -177,7 +177,7 @@ class RegistrationTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual({cmd.name for cmd in client.tree.get_commands(guild=discord.Object(id=GUILD))},{'cvpilot','openclaw'})
                 payload=listener.cvpilot.to_dict(client.tree)
                 leaves={command.qualified_name for command in listener.cvpilot.walk_commands() if not hasattr(command,'commands')}
-                self.assertEqual(len(leaves),20)
+                self.assertEqual(len(leaves),21)
                 self.assertIn('cvpilot reset',leaves)
                 self.assertTrue({'cvpilot history','cvpilot revert'}<=leaves)
                 self.assertEqual(payload['contexts'],[0,1])

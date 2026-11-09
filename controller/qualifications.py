@@ -77,14 +77,14 @@ def source(uid,jid,index,store):
     return job,questions[index-1]
 
 
-def request(uid,args,user,store):
+def request(uid,args,user,store,*,standalone=False):
     with LOCK:
         now=time.monotonic()
         for key in list(PENDING):
             if PENDING[key]['expires']<=now:del PENDING[key]
         operation=args.get('operation','prepare')
         if operation=='prepare':
-            job,question=source(uid,args.get('job_id'),args.get('question'),store)
+            job,question=({'id':None},{'term':'User statement','question':'What experience are you explicitly saving?'}) if standalone else source(uid,args.get('job_id'),args.get('question'),store)
             statement=args.get('details','')
             if (not isinstance(statement,str) or not 5<=len(statement.strip())<=1200
                     or statement.strip().casefold() in ('yes','no','true','false')):
@@ -93,10 +93,10 @@ def request(uid,args,user,store):
             _,repo_id,head=checked_repo(uid,user)
             statement=' '.join(statement.split());token=secrets.token_urlsafe(32)
             PENDING[uid]={'token':token,'repo':user['repo'],'repo_id':repo_id,'head':head,'expires':now+TTL,
-                          'source_job':job['id'],'question':args['question'],'term':question['term'],'statement':statement}
+                          'source_job':job['id'],'question':0 if standalone else args['question'],'term':question['term'],'statement':statement}
             return {'text':f'Save this statement to your master profile?\nTopic: {question["term"]}\nQuestion: {question["question"]}\nYour statement: {statement}\n'
                     'Only your statement is saved; no qualifications are inferred. Source resumes remain unchanged. '
-                    f'Choose Save to profile, then type CONFIRM within 2 minutes. After saving, continue job #{job["id"]} if it is awaiting answers.',
+                    f'Choose Save to profile, then type CONFIRM within 2 minutes. After saving, continue your pending tailoring job if it is awaiting answers.',
                     'confirmation_token':token}
         pending=PENDING.get(uid);token=args.get('token','')
         if not pending or not isinstance(token,str) or not hmac.compare_digest(token,pending['token']) or pending['repo']!=user['repo']:
@@ -104,7 +104,8 @@ def request(uid,args,user,store):
         if operation=='cancel':
             del PENDING[uid];return {'text':'Answer cancelled. Nothing was added to your profile.'}
         if operation!='confirm' or args.get('confirmation')!='CONFIRM':raise ValueError('Type CONFIRM exactly to save your statement.')
-        source(uid,pending['source_job'],pending['question'],store)
+        if pending['source_job'] is not None:source(uid,pending['source_job'],pending['question'],store)
+        if standalone!=(pending['source_job'] is None):raise ValueError('Confirmation belongs to a different profile operation.')
         if store.has_pending(uid):raise ValueError('Wait for your queued/running jobs before confirming.')
         _,repo_id,head=checked_repo(uid,user)
         if repo_id!=pending['repo_id'] or head!=pending['head']:raise ValueError('Repository changed since the preview. Run /cvpilot answer again.')
@@ -120,9 +121,11 @@ def save(job,store):
     if (not user or data.get('confirmed') is not True or data.get('repo')!=user.get('repo')
             or not main_commits.OID.fullmatch(data.get('head','')) or not isinstance(data.get('statement'),str)
             or not 5<=len(data['statement'])<=1200):raise ValueError('A reviewed, confirmed statement for this account is required.')
-    original,question=source(uid,data.get('source_job'),data.get('question'),store)
+    question={'term':'User statement'}
+    if data.get('source_job') is not None:_,question=source(uid,data.get('source_job'),data.get('question'),store)
+    elif data.get('question')!=0:raise ValueError('Invalid standalone statement confirmation')
     if data.get('term')!=question['term']:raise ValueError('Question no longer matches the confirmed answer.')
-    repo,repo_id,head=checked_repo(uid,user)
+    _,repo_id,head=checked_repo(uid,user)
     if repo_id!=data.get('repo_id'):raise ValueError('Repository identity changed.')
     recovered=main_commits.recover(w,job,store)
     if recovered is not None:return recovered
@@ -145,7 +148,7 @@ def save(job,store):
         md.write_text(current.rstrip()+'\n\n- '+text+'\n',encoding='utf-8')
         path.write_text(json.dumps(metadata,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
     w.run_git(uid,task,'add','-f','--','profile/MASTER_PROFILE.md','profile/profile_sources.json')
-    return main_commits.publish(w,job,store,{'artifacts':[],'note':f'Your statement was saved to the master profile. If job #{data["source_job"]} is awaiting answers, run /cvpilot continue job_id:{data["source_job"]} after reviewing the remaining questions. Otherwise submit a new tailor request. Source resumes were unchanged.'})
+    return main_commits.publish(w,job,store,{'artifacts':[],'note':'Your statement was saved to the detailed master profile. Continue your pending tailoring job after reviewing the remaining questions, or submit a new tailor request. Source resumes were unchanged.'})
 
 
 class ReviewRequired(Exception):

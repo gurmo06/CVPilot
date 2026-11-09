@@ -49,7 +49,11 @@ class ProfileSyncTests(unittest.TestCase):
                 else:value={'status':'unchanged'}
                 return json.dumps({'status':'ok','result':{'payloads':[{'text':json.dumps(value)}]}})
             return original(argv,**kwargs)
-        with mock.patch.object(worker,'run',side_effect=agent):return worker.work(job,self.store)
+        def legacy_sync(w,job,task):
+            response=w.agent_completion(job,'Legacy profile response parser fixture.',w.ROOT/'job-reports'/UID/f'{job["id"]}.json')
+            profile_sync.apply_response(task,response)
+        with mock.patch.object(worker,'run',side_effect=agent),mock.patch.object(profile_sync,'sync_in_depth',side_effect=legacy_sync):
+            return worker.work(job,self.store)
 
     def finish(self,job,result):
         self.store.finish(job['id'],'done',result);worker.cleanup_completed(UID,job['id'])
@@ -132,12 +136,20 @@ class ProfileSyncTests(unittest.TestCase):
         metadata['facts'].pop('confirmed');file.write_text(json.dumps(metadata))
         with self.assertRaisesRegex(ValueError,'preserve user-confirmed'):profile_sync.validate(task,expected,worker.KIT/'repo-template/profile/MASTER_PROFILE.md',confirmed)
 
-    def test_prompt_supplies_text_and_hashes_without_filesystem_dependence(self):
+    def test_source_extraction_receives_text_and_binds_trusted_hashes(self):
         task,_=worker.new_worktree(UID,42,'profile-sync');manifest=profile_sync.prepare(task,'a'*40)
-        prompt=worker.agent_prompt({'discord_id':UID,'id':42,'kind':'profile-sync','payload':'{}'},task)
+        record={'category':'Experience','text':'Verified teaching experience','evidence':'Verified teaching experience'}
+        response={'payloads':[{'text':json.dumps({'facts':[record]})}]}
+        job={'discord_id':UID,'id':42,'kind':'profile-sync','payload':'{}'}
+        with mock.patch.object(worker,'agent_completion',return_value=response) as model:
+            profile_sync.sync_in_depth(worker,job,task)
+        prompt=model.call_args.args[1]
         self.assertIn('Verified teaching experience',prompt)
-        self.assertIn(manifest['master-resumes/general/resume.tex'],prompt)
-        self.assertIn('DO NOT use filesystem tools',prompt)
+        self.assertIn('No tools or filesystem access',prompt)
+        metadata=json.loads((task/'profile/profile_sources.json').read_text())
+        refs=[ref for fact in metadata['facts'].values() for ref in fact['sources']]
+        self.assertTrue(refs)
+        self.assertTrue(all(ref['sha256']==manifest[ref['path']] for ref in refs))
 
     def test_false_unchanged_with_empty_profile_is_rejected(self):
         job=self.job()

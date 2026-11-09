@@ -29,3 +29,7 @@ or field of study. Keep source references and never add unsupported claims.
 
 ## Needs review
 <!-- Conflicting or incomplete facts that need confirmation -->
+
+<!-- This profile is a detailed career evidence database with no page limit.
+Preserve context, responsibilities, methods, tools, results, dates and source
+provenance. Resume length and conversation compaction must not shorten it. -->

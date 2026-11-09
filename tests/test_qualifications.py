@@ -70,6 +70,22 @@ class QualificationTests(unittest.TestCase):
         self.fixture.finish(self.fixture.revert_job(result['commit']))
         self.assertFalse(git('-C',repo,'ls-tree','main','--','profile/profile_sources.json'))
 
+    def test_standalone_profile_statement_needs_exact_confirmation_and_no_model(self):
+        text='I designed lesson plans and mentored 12 students for two years.'
+        before=self.fixture.main()
+        preview=self.call('profile',{'operation':'edit','instructions':text})
+        self.assertIn(text,preview['text']);self.assertIsNone(self.store.claim())
+        with self.assertRaisesRegex(ValueError,'CONFIRM'):
+            self.call('profile-fact',{'operation':'confirm','token':preview['confirmation_token'],'confirmation':'yes'})
+        self.call('profile-fact',{'operation':'confirm','token':preview['confirmation_token'],'confirmation':'CONFIRM'})
+        job=self.store.claim();self.assertEqual(job['kind'],'profile-confirm')
+        with mock.patch.object(worker,'agent_completion',side_effect=AssertionError('No model may expand the statement')):
+            result=self.fixture.finish(job)
+        metadata=json.loads(self.fixture.git('-C',str(self.fixture.remote),'show','main:profile/profile_sources.json'))
+        fact=next(iter(metadata['facts'].values()));self.assertEqual(fact['text'],text)
+        self.assertTrue(fact['user_confirmed']);self.assertIsNone(fact['confirmation']['job_id'])
+        self.assertNotEqual(result['commit'],before)
+
     def test_existing_provenance_and_user_confirmations_are_preserved(self):
         prior={'text':'Previously confirmed credential','user_confirmed':True}
         self.fixture.external_edit('profile/MASTER_PROFILE.md','# Profile\nExisting facts.')

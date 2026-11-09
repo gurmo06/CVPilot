@@ -157,7 +157,7 @@ class QueueStatusTests(unittest.TestCase):
         cases=[('tailor',{'url':'https://example.org/job'}),
                ('master',{'operation':'edit','label':'general','instructions':'Clarify verified experience'}),
                ('master',{'operation':'upload','label':'general','files':attachments.attachments(('cv.pdf',attachments.PDF))}),
-               ('profile',{'operation':'sync'}),('profile',{'operation':'edit','instructions':'Verified new facts'})]
+               ('profile',{'operation':'sync'})]
         for action,args in cases:
             result=self.call(action,args);self.assertIn('Queue position',result['text']);self.assertIn('Queue load:',result['text'])
         new='323456789012345678'

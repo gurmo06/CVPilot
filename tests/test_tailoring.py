@@ -59,7 +59,7 @@ class TailoringTests(unittest.TestCase):
 
     def test_prompt_has_full_source_text_profile_hashes_and_no_filesystem_dependency(self):
         job={'id':33,'discord_id':fixtures.UID,'kind':'tailor','payload':json.dumps({'url':URL})}
-        prompt=worker.agent_prompt(job,self.task,{'text':'Exact public teaching posting'},self.pack)
+        prompt=worker.agent_prompt(job,{'text':'Exact public teaching posting'},self.pack)
         self.assertIn('DO NOT use ls, read, write, edit, exec',prompt)
         self.assertIn('Verified teaching experience',prompt);self.assertIn('source_manifest',prompt)
         self.assertIn('current_profile_sources',prompt);self.assertIn('cvpilot-resume-tex',prompt)

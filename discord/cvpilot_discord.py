@@ -151,32 +151,28 @@ async def help_command(interaction: discord.Interaction):
     if not await public_authorized(interaction):
         return
     help_text = (
-        '**CVPilot — Quick Help**\n'
-        'Use #cvpilot or DM CVPilot with your current server role.\n\n'
-        '`/cvpilot init github_username:<name>` — Create a private repo.\n'
+        '**CVPilot** — DM CVPilot or mention it in its server channel. Chat and commands share your context.\n'
+        '`/cvpilot context operation:show|compact|wipe` — Usage and memory choices. Compaction can lose detail.\n'
+        '`/cvpilot init github_username:<name>` — Private repository.\n'
         '`/cvpilot repo` — Repository link.\n'
-        '`/cvpilot status [job_id]` — One detailed job; arrows browse history.\n\n'
-        '**Applications**\n'
-        '`/cvpilot tailor url:<posting>` — One-page PDF/TeX by private DM.\n'
-        '`/cvpilot download job_id:<id>` — Private files; omit ID for latest.\n'
-        '`/cvpilot application delete link:<URL>` or `commit:<ID>` — Delete one application.\n\n'
-        '**Master resumes**\n'
-        '`/cvpilot master upload file:<PDF or TeX> label:<label> companion:<optional file>`\n'
-        '`/cvpilot master get label:<label>` — Private source attachments.\n'
-        '`/cvpilot master edit label:<label> instructions:<change>`\n'
-        '`/cvpilot master delete label:<label>` or `commit:<ID>` — Delete one source.\n'
-        'Labels default to general; use healthcare, sales or any label. Reusing a label replaces it.\n'
-        'PDF/UTF-8 TeX: 8 MiB each. TeX-only uploads compile to PDF; companion supplies a matching pair. Wait for completion before tailoring.\n\n'
-        '**Profile and history**\n'
-        '`/cvpilot profile show` | `/cvpilot profile sync`\n'
-        '`/cvpilot profile edit instructions:<facts>`\n'
-        '`/cvpilot answer job_id:<id> question:<n> details:<experience>` — Review and confirm a profile fact.\n'
-        '`/cvpilot continue job_id:<id>` — Resume after reviewing qualification questions.\n'
-        '`/cvpilot history limit:<1–10>` — Main commits.\n'
-        '`/cvpilot revert commit:<ID>` — Undo one commit; type REVERT.\n'
-        '`/cvpilot reset` — Restore template and delete other branches; type RESET.\n'
-        '`/cvpilot settings master_edit value:<on|off|show>` — Opt in to requested master edits.\n\n'
-        'Deletions require a preview and typing DELETE. Files leave main and CVPilot downloads; Git history and sent attachments remain. Profile facts are kept. Changes commit to main; revert can restore deletions.'
+        '`/cvpilot status [job_id]` — Detailed status; arrows browse jobs.\n'
+        '`/cvpilot tailor url:<posting>` — Tailored PDF/TeX by DM.\n'
+        '`/cvpilot download [job_id]` — Download tailored attachments.\n'
+        '`/cvpilot master upload file:<PDF/TeX> [label] [companion]` — Upload sources, 8 MiB each. TeX compiles to PDF.\n'
+        '`/cvpilot master get [label]` — Download sources.\n'
+        '`/cvpilot master edit instructions:<change> [label]` — Explicit source edit.\n'
+        '`/cvpilot master delete [label|commit]` — Delete a source.\n'
+        '`/cvpilot application delete [link|commit]` — Delete a tailored application.\n'
+        '`/cvpilot profile show` — Detailed evidence database.\n'
+        '`/cvpilot profile sync` — Extract details from all sources.\n'
+        '`/cvpilot profile edit instructions:<facts>` — Review and confirm your statement.\n'
+        '`/cvpilot answer job_id:<id> question:<n> details:<experience>` — Confirm a qualification answer.\n'
+        '`/cvpilot continue job_id:<id>` — Resume after qualification review.\n'
+        '`/cvpilot history [limit]` — Main commits.\n'
+        '`/cvpilot revert commit:<ID>` — Undo a commit; type REVERT.\n'
+        '`/cvpilot reset` — Restore template; type RESET.\n'
+        '`/cvpilot settings master_edit value:on|off|show` — Source edit permission.\n'
+        'Labels cover any profession (healthcare, sales, etc.) and default to general. Changes commit to main. Deletions require DELETE; Git history and sent attachments remain.'
     )
     await private_reply(interaction,help_text)
 
@@ -290,6 +286,16 @@ class MasterDeleteView(ResetView):
 
 class ApplicationDeleteView(MasterDeleteView):
     action='application-delete'
+
+
+class ProfileFactView(ResetView):
+    action='profile-fact'
+    modal_type=AnswerModal
+
+    @discord.ui.button(label='Save to profile',style=discord.ButtonStyle.primary)
+    async def confirm(self,interaction:discord.Interaction,button:discord.ui.Button):
+        if not await self.interaction_check(interaction):return
+        await interaction.response.send_modal(self.modal_type(self))
 
 
 class AnswerView(ResetView):
@@ -532,7 +538,7 @@ async def profile_sync(interaction: discord.Interaction):
 @profile.command(name='edit', description='Request changes to verified profile facts')
 @app_commands.describe(instructions='Describe verified skills, tools, projects, or experience to update')
 async def profile_edit(interaction: discord.Interaction, instructions: str):
-    await invoke(interaction, 'profile', operation='edit', instructions=instructions)
+    await prepare_repository_change(interaction,'profile-fact',ProfileFactView,details=instructions)
 
 settings = app_commands.Group(name='settings', description='Control master-resume editing permission', parent=cvpilot)
 
@@ -540,6 +546,11 @@ settings = app_commands.Group(name='settings', description='Control master-resum
 @app_commands.describe(value='Whether explicitly requested master edits are allowed')
 async def settings_master_edit(interaction: discord.Interaction, value: Literal['on', 'off', 'show']):
     await invoke(interaction, 'settings', option='master_edit', value=value)
+
+@cvpilot.command(name='context', description='Inspect, compact (may lose detail), or wipe your conversation context')
+@app_commands.describe(operation='show usage; compact may reduce accuracy; wipe starts fresh and keeps your profile')
+async def context_command(interaction: discord.Interaction, operation: Literal['show','compact','wipe'] = 'show'):
+    await invoke(interaction,'context',operation=operation)
 
 # Owner-only OpenClaw controls are guild-local, NOT global DM commands.
 # They expose a minimal read-only set; unrestricted OpenClaw CLI / admin tools
@@ -614,10 +625,69 @@ async def admin_agents(interaction: discord.Interaction):
 async def admin_health(interaction: discord.Interaction):
     await show_admin_cli(interaction, 'health', '--json')
 
+@openclaw_admin.command(name='contexts', description='Inspect per-user context state/limits or set a user limit')
+@app_commands.describe(user_id='Optional Discord user ID', limit='Optional conservative token limit, 2048–64000')
+async def admin_contexts(interaction: discord.Interaction, user_id: str | None = None,
+                         limit: app_commands.Range[int,2048,64000] | None = None):
+    if not await admin_authorized(interaction):return
+    await defer_private(interaction)
+    try:
+        result=await request_controller(interaction.user.id,'contexts-admin',{'user_id':user_id,'limit':limit})
+        rows=result.get('contexts',[])
+        files=[discord.File(io.BytesIO(json.dumps(rows,indent=2).encode()),filename='cvpilot-contexts.json')] if rows else []
+        await interaction.followup.send(str(result.get('text',''))[:1900],files=files,ephemeral=True,
+                                        allowed_mentions=discord.AllowedMentions.none())
+    except (OSError,TimeoutError,RuntimeError,ValueError) as exc:
+        await private_reply(interaction,str(exc)[:1800])
+
+
+async def receive_chat(client,message):
+    if message.author.bot:return
+    if message.guild is not None:
+        if message.guild.id!=int(GUILD_ID) or message.channel.id!=int(PUBLIC_CHANNEL_ID):return
+        if not client.user or not any(u.id==client.user.id for u in message.mentions):return
+    elif message.channel.type!=discord.ChannelType.private:return
+    # Reuse the command authorization boundary for every message, including a
+    # fresh guild member lookup for DMs. The adapter sends privately only.
+    from types import SimpleNamespace
+    async def noop(**kwargs):pass
+    async def reply(text,**kwargs):
+        kwargs.pop('ephemeral',None)
+        return await message.author.send(text,**kwargs)
+    adapter=SimpleNamespace(user=message.author,guild_id=message.guild.id if message.guild else None,
+        channel_id=message.channel.id,channel=message.channel,client=client,
+        response=SimpleNamespace(is_done=lambda:True,defer=noop),followup=SimpleNamespace(send=reply))
+    if not await public_authorized(adapter):return
+    text=message.content or ''
+    if client.user:
+        text=text.replace(f'<@{client.user.id}>','').replace(f'<@!{client.user.id}>','').strip()
+    if text.startswith('/'):return
+    files=[]
+    try:
+        if message.attachments:
+            if len(message.attachments)>2:raise ValueError('Attach at most two matching PDF/TeX source files.')
+            for item in message.attachments:
+                if not 0<item.size<=MAX_FILE_BYTES or Path(item.filename).suffix.lower() not in ('.tex','.pdf'):
+                    raise ValueError('Chat uploads support PDF/TeX resumes up to 8 MiB each.')
+            contents=await asyncio.gather(*(asyncio.wait_for(item.read(),timeout=60) for item in message.attachments))
+            files=[{'filename':item.filename,'content_base64':base64.b64encode(data).decode('ascii')}
+                   for item,data in zip(message.attachments,contents)]
+            validate_files(files)
+        if not text:
+            if not files:return
+            text='I attached resume sources. Ask me which label to upload them under.'
+        result=await request_controller(message.author.id,'chat',{'text':text,'message_id':str(message.id),'files':files})
+        if not result.get('ok') or result.get('chat_immediate'):await reply(str(result.get('text','Unable to accept message.'))[:1900],allowed_mentions=discord.AllowedMentions.none())
+    except (OSError,TimeoutError,ValueError,RuntimeError,discord.HTTPException) as exc:
+        await reply('CVPilot chat: '+str(exc)[:1700],allowed_mentions=discord.AllowedMentions.none())
+
+
 class CVPilotClient(discord.Client):
     def __init__(self):
         intents = discord.Intents.none()
-        intents.guilds = True  # no message content/member/presence intents
+        intents.guilds = True
+        intents.dm_messages = True
+        intents.guild_messages = True  # DMs and explicit mentions; no privileged message-content/member intents
         super().__init__(intents=intents)
         self.tree = app_commands.CommandTree(self)
 
@@ -641,21 +711,24 @@ class CVPilotClient(discord.Client):
               ', '.join(c.name for c in guild_synced), flush=True)
         # Previous guild cleanup is deliberate and manual, never automatic.
 
+    async def on_message(self,message):
+        await receive_chat(self,message)
+
     async def on_ready(self):
-        print(f'[cvpilot] Native command client ready as {self.user} (command-only)', flush=True)
+        print(f'[cvpilot] Native command client ready as {self.user} (shared commands and private chat)', flush=True)
 
 if __name__ == '__main__':
     import sys
     if '--check' in sys.argv:
         names = {cmd.qualified_name for cmd in cvpilot.walk_commands()}
-        expected = {'cvpilot help', 'cvpilot init', 'cvpilot repo', 'cvpilot status', 'cvpilot tailor', 'cvpilot answer', 'cvpilot continue', 'cvpilot download', 'cvpilot reset', 'cvpilot history', 'cvpilot revert',
+        expected = {'cvpilot help', 'cvpilot context', 'cvpilot init', 'cvpilot repo', 'cvpilot status', 'cvpilot tailor', 'cvpilot answer', 'cvpilot continue', 'cvpilot download', 'cvpilot reset', 'cvpilot history', 'cvpilot revert',
                     'cvpilot master get', 'cvpilot master edit', 'cvpilot master upload', 'cvpilot master delete', 'cvpilot application delete',
                     'cvpilot profile show', 'cvpilot profile sync', 'cvpilot profile edit',
                     'cvpilot settings master_edit'}
         missing = expected - names
         if missing:
             raise SystemExit('Missing native subcommands: ' + ', '.join(sorted(missing)))
-        print('OK: 20 server/DM CVPilot subcommands and 4 server-only admin diagnostics defined')
+        print('OK: 21 server/DM CVPilot subcommands and 5 server-only admin diagnostics defined')
         sys.exit(0)
     if not TOKEN or TOKEN == 'REPLACE_WITH_TOKEN':
         raise SystemExit('Set CVPILOT_DISCORD_TOKEN in ~/.config/cvpilot/controller.env')

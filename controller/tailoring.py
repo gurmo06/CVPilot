@@ -46,18 +46,65 @@ def source_text(pack):
     return '\n\n'.join(sections)
 
 
-def prepare(task,base,extract_pdf):
+def prepare(task,base,extract_pdf,*,query=''):
     # This already prefers TeX over paired PDFs, extracts PDF-only sources,
     # bounds input size, and includes every source hash and confirmed fact.
     snapshot=profile_snapshot(task)
-    profile_sync.prepare(task,base,extract_pdf)
+    profile_sync.prepare(task,base,extract_pdf,max_text=None)
     path=task/'.cvpilot-sync-inputs.json';path.chmod(0o600)
     pack=json.loads(path.read_text())
     pack['profile_snapshot']=snapshot
+    # Full evidence archives stay in the database; raw masters are already
+    # supplied separately. Avoid duplicating every historical source in prompts.
+    pack.get('current_profile_sources',{}).pop('source_texts',None)
+    pack.get('current_profile_sources',{}).pop('legacy_profile_markdown',None)
+    project_evidence(pack,query)
     path.write_text(json.dumps(pack,ensure_ascii=False,indent=2),encoding='utf-8')
-    if len(json.dumps(pack,ensure_ascii=False))>140000:
-        raise ValueError('Resume and profile evidence is too large for one tailoring request. Use shorter sources before retrying.')
+    if len(json.dumps(pack,ensure_ascii=False))>160000:
+        raise ValueError('Too many source records for one prompt; your full evidence database is unchanged. Ask the operator to increase retrieval capacity.')
     return pack
+
+
+def project_evidence(pack,query):
+    """Retrieve complete relevant records/excerpts; never rewrite source files.
+
+    Small profiles keep their full existing projection. Larger databases use
+    lexical posting retrieval, with explicit coverage metadata and every source
+    hash retained. The durable database and full sources have no resume limit.
+    """
+    if len(json.dumps(pack,ensure_ascii=False))<=120000:return
+    terms=set(re.findall(r'\w{3,}',query.lower()))
+    def score(text):return len(terms.intersection(re.findall(r'\w{3,}',text.lower())))
+    metadata=pack.get('current_profile_sources',{});facts=metadata.get('facts',{})
+    ranked=sorted(facts.items(),key=lambda item:(-score(str(item[1])),-bool(item[1].get('user_confirmed'))))
+    selected={};size=0
+    for key,fact in ranked:
+        length=len(json.dumps(fact,ensure_ascii=False))
+        if size+length<=26000:selected[key]=fact;size+=length
+    metadata['facts']=selected
+    pack['current_profile']='\n\n'.join(str(fact.get('text','')) for fact in selected.values())
+    coverage={'profile_records_total':len(facts),'profile_records_selected':len(selected),
+        'instruction':'This is a bounded retrieval projection, not a shortened database. Missing evidence in excerpts is not proof of missing experience. Ask focused questions when needed. Full originals remain unchanged.'}
+    documents=pack.get('documents',[])
+    layouts=[doc for doc in documents if doc['path'].lower().endswith('.tex') and len(doc['text'])<=24000]
+    layout=min(layouts,key=lambda doc:len(doc['text'])) if layouts else None
+    reserve=len(layout['text']) if layout else 0
+    allowance=max(900,(42000-reserve)//max(1,len(documents)-(1 if layout else 0)))
+    projected=[]
+    for document in documents:
+        text=document['text']
+        if document is layout:projected.append(document);continue
+        if len(text)<=allowance:projected.append(document);continue
+        candidates=list(profile_sync.chunks(text,limit=1000,overlap=100))
+        ranks=sorted(range(len(candidates)),key=lambda i:(-score(candidates[i]),i))
+        indexes={0};used=len(candidates[0])
+        # Keep the layout preamble for a selected TeX source when it fits.
+        for index in ranks:
+            if index in indexes:continue
+            if used+len(candidates[index])<=allowance:indexes.add(index);used+=len(candidates[index])
+        projected.append(document|{'text':'\n% [retrieved excerpt boundary]\n'.join(candidates[i] for i in sorted(indexes)),
+            'retrieved_excerpt':True,'original_characters':len(text)})
+    pack['documents']=projected;pack['retrieval']=coverage
 
 
 def prompt(job,pack,posting):

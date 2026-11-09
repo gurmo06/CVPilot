@@ -90,7 +90,7 @@ def build(w, uid, repo, kind, jid, payload=None, draft=None):
     elif kind=='profile-edit':summary='Update verified profile facts'
     elif kind=='profile-confirm':
         summary='Save user-confirmed '+single_line(payload.get('term','experience'),65)
-        details.extend([f'Follow-up to job {payload.get("source_job")}, question {payload.get("question")}.',
+        details.extend([(f'Follow-up to job {payload.get("source_job")}, question {payload.get("question")}.' if payload.get('source_job') is not None else 'User explicitly reviewed and confirmed this profile statement.'),
                         'Confirmed statement: '+single_line(payload.get('statement',''),1200)])
     elif kind=='init':summary='Initialize CVPilot workspace'
     elif kind=='reset':
