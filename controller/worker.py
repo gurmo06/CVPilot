@@ -2,6 +2,7 @@ import json, os, re, secrets, shutil, subprocess, time, hashlib, tempfile
 from pathlib import Path
 from store import Store
 import application_paths
+import qualifications
 from github import GitHub,GitHubAPIError,cmd,ssh_env,https_git_env
 from job_status import progress, missing_output
 from resumes import (label, inbox_path, staged_files, read_blob, artifact_files,
@@ -871,6 +872,11 @@ def download_master(uid, role, store):
             'attachments':encode_attachments(sorted(files.items()))}
 
 
+def review_qualifications(job,store,pack,posting):
+    import sys
+    return qualifications.review(sys.modules[__name__],job,store,pack,posting)
+
+
 def run_resume_job(job,store,*,reuse_saved_response=False):
     import main_commits,sys
     w=sys.modules[__name__]
@@ -892,9 +898,6 @@ def run_resume_job(job,store,*,reuse_saved_response=False):
     repo_url=f"https://github.com/{user['repo']}"
     progress(store.path.parent,job,'Fetching main and preparing the private source snapshot')
     task,_=new_worktree(uid,jid,kind)
-    publication=main_commits.begin(w,job,store)
-    if reuse_saved_response and run_git(uid,repopath(uid),'rev-parse','origin/main')!=publication['base']:
-        raise ValueError('Main changed since this job ran. Submit a fresh job instead of replaying old output.')
     apply_uploaded_sources(uid,store,task)
     if kind=='tailor':
         inputs=list(task.glob('master-resumes/**/*.tex')) + list(task.glob('master-resumes/**/*.pdf'))
@@ -909,17 +912,21 @@ def run_resume_job(job,store,*,reuse_saved_response=False):
                 '-v',f'{snapshot}:/work:ro',IMAGE,'pdftotext','-layout','/work/'+pdf.relative_to(snapshot).as_posix(),'-'],timeout=60)
         if kind=='tailor':
             import tailoring
-            resume_inputs=tailoring.prepare(task,publication['base'],extract_pdf)
+            resume_inputs=tailoring.prepare(task,run_git(uid,gitworktree(uid,jid),'rev-parse','HEAD'),extract_pdf)
         else:
             sync_inputs=profile_sync.prepare(task,run_git(uid,gitworktree(uid,jid),'rev-parse','HEAD'),extract_pdf)
             prior_confirmed=profile_sync.confirmed_facts(task)
-    task=stage_agent_task(uid,jid,task)
     posting=None
     if kind=='tailor' and not reuse_saved_response:
         import job_posting
         progress(store.path.parent,job,'Retrieving the exact posting (structured description for Workday links)')
         posting=job_posting.fetch(data['url'])
         if posting:_write_intent(ROOT/'job-postings'/uid/f'{jid}.json',posting)
+        review_qualifications(job,store,resume_inputs,posting)
+    publication=main_commits.begin(w,job,store)
+    if reuse_saved_response and run_git(uid,repopath(uid),'rev-parse','origin/main')!=publication['base']:
+        raise ValueError('Main changed since this job ran. Submit a fresh job instead of replaying old output.')
+    task=stage_agent_task(uid,jid,task)
     prompt=agent_prompt(job,task,posting,resume_inputs)
     deadline=time.monotonic()+900
     progress(store.path.parent,job,'Reading retained agent response' if reuse_saved_response else 'Waiting for the agent to process sources and produce output (up to 15 minutes)')
@@ -939,6 +946,9 @@ def run_resume_job(job,store,*,reuse_saved_response=False):
         folder=application_paths.existing_directory(task,jid) or application_paths.new_directory(jid,posting=posting)
         target=task/folder/'resume.tex'
         if not target.is_file():raise RuntimeError(missing_output(target.relative_to(task),response))
+        import qualifications
+        followups=qualifications.questions_for(job,store.path.parent) or qualifications.extract((target.parent/'notes.md').read_text() if (target.parent/'notes.md').is_file() else '')
+        _write_intent(ROOT/'job-questions'/uid/f'{jid}.json',{'job_id':jid,'kind':'tailor','questions':followups})
         import page_refinement
         page_fit=page_refinement.fit(w,job,store,task,target,resume_inputs,posting,response,deadline,allow_model=not reuse_saved_response)
         tailoring.validate_inputs(task,resume_inputs)
@@ -989,9 +999,14 @@ def run_resume_job(job,store,*,reuse_saved_response=False):
         note=(f'Profile sync complete. {verified_facts} verified facts recorded from {len(sync_inputs)} source files. Changes committed to main.'
               if changed else 'Profile and source records are already current. No new commit was created.')
     progress(store.path.parent,job,'Committing validated changes and publishing to main')
-    if kind=='tailor' and page_fit['rounds']:
+    if kind=='tailor' and page_fit.get('warning'):
+        note+=' '+page_fit['warning']
+    elif kind=='tailor' and page_fit['rounds']:
         note+=f" Page fit completed after {page_fit['rounds']} measured refinement round(s); font sizes and layout were preserved."
-    return main_commits.publish(w,job,store,{'note':note,'artifacts':artifacts})
+    if kind=='tailor':
+        extra=qualifications.message(jid,followups) if not data.get('accepted_review') else ''
+        if extra:note+='\n\n'+extra
+    return main_commits.publish(w,job,store,{'note':note,'artifacts':artifacts,**({'questions':followups} if kind=='tailor' else {})})
 
 
 def cleanup_completed(uid, jid):
@@ -1012,6 +1027,9 @@ def cleanup_completed(uid, jid):
 def work(job,store):
     if job['kind']=='init':return repo_init(job,store)
     if job['kind']=='master-upload':return run_upload_job(job,store)
+    if job['kind']=='profile-confirm':
+        from qualifications import save
+        return save(job,store)
     if job['kind']=='reset':
         from reset_repo import reset_repository
         return reset_repository(job,store)
@@ -1046,7 +1064,16 @@ def forever(store,stop=None):
                 try:shutil.rmtree(inbox_path(ROOT,job['discord_id'],payload['upload_id']))
                 except OSError as exc:print(f'CVPilot upload cleanup warning job {job["id"]}: {exc}',flush=True)
             notify(job['discord_id'],f"CVPilot job #{job['id']} complete. {result.get('url','')}\n{result.get('note','')}",files=files)
+        except qualifications.ReviewRequired as review:
+            note='Awaiting your qualification review before drafting. No application files have been created or published.\n'+qualifications.message(job['id'],review.questions)
+            store.finish(job['id'],'needs-input',result={'questions':review.questions,'note':note})
+            progress(store.path.parent,job,'Awaiting answers or an explicit continue command; drafting has not started')
+            cleanup_completed(job['discord_id'],job['id'])
+            notify(job['discord_id'],f'CVPilot job #{job["id"]} needs your input.\n'+note)
         except Exception as e:
             store.finish(job['id'],'failed',error=str(e))
-            notify(job['discord_id'],f"CVPilot job #{job['id']} failed: {str(e)[:1400]}. Check `/cvpilot status`.")
+            from qualifications import questions_for,message
+            followup=message(job['id'],questions_for(job,store.path.parent)) if job['kind']=='tailor' else ''
+            limit=600 if followup else 1400
+            notify(job['discord_id'],f"CVPilot job #{job['id']} failed: {str(e)[:limit]}. Check `/cvpilot status`."+('\n'+followup if followup else ''))
             print(f'Job {job["id"]} failed: {e}',flush=True)

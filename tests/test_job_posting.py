@@ -103,6 +103,7 @@ class JobPostingTests(unittest.TestCase):
             with (mock.patch.object(worker,'ROOT',root),mock.patch.object(worker,'new_worktree',return_value=(task,'main')),
                   mock.patch.object(worker,'stage_agent_task',return_value=task),mock.patch.object(main_commits,'recover',return_value=None),
                   mock.patch.object(main_commits,'begin',return_value={'base':'a'*40}),mock.patch.object(main_commits,'publish') as publish,
+                  mock.patch.object(worker,'run_git',return_value='a'*40),
                   mock.patch.object(job_posting,'fetch',side_effect=RuntimeError('Posting unavailable')),
                   mock.patch.object(worker,'run') as agent):
                 with self.assertRaisesRegex(RuntimeError,'Posting unavailable'):worker.run_resume_job(job,store)

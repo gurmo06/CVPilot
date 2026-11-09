@@ -109,13 +109,21 @@ def detail(root, snapshot):
     title=f'CVPilot job #{jid} — {job["kind"]}: {state}'
     timing=[]
     for name,key in (('Queued','created_at'),('Started','started_at'),('Finished','finished_at')):
+        if state=='needs-input' and name=='Finished':name='Paused'
         value=timestamp(job[key]);timing.append(f'{name}: <t:{value}:F>' if value is not None else f'{name}: —')
     start=timestamp(job['started_at']);end=timestamp(job['finished_at'])
     if start is not None:timing.append(('Run time: ' if end is not None else 'Running for: ')+duration((end or now)-start))
     if state=='queued':timing.append('Waiting for: '+duration(now-(timestamp(job['created_at']) or now)))
     add('Timing','\n'.join(timing))
     add('Queue',load_text(snapshot)+'\n'+(position_text(job,snapshot) if state in ('queued','running') else 'This job no longer occupies the queue.')+f'\nYour pending jobs: {snapshot["own_pending"]}.')
+    if state=='needs-input':add('Awaiting your input',f'Review the qualification questions below, save any factual answers, then use /cvpilot continue job_id:{jid}. Unanswered qualifications remain unconfirmed. Drafting and publication have not started.')
     stage=checkpoint.get('stage')
+    if job['kind']=='tailor':
+        from qualifications import questions_for,message
+        followups=questions_for(job,root)
+        if followups and payload.get('accepted_review'):
+            add('Qualification review','Review acknowledged before drafting. Saved confirmed profile facts are used; unanswered qualifications remain unconfirmed.')
+        elif followups:add('Questions for you',message(jid,followups),1000)
     if stage:add('Progress' if state in ('queued','running') else 'Last checkpoint',stage+f'\nUpdated: {checkpoint.get("updated_at")} UTC')
     elif state=='queued':add('Progress','Waiting for the worker to claim this job.')
     elif state=='running':add('Progress','Worker is processing this job. No stage checkpoint is available for this older run.')

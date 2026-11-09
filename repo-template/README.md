@@ -31,8 +31,9 @@ changes only the application files; masters and the profile remain unchanged.
 An empty or outdated profile does not block tailoring. Use `/cvpilot profile sync`
 to rebuild the profile separately from the current masters.
 
-Tailoring starts from the closest existing master and makes minimal necessary
-edits for the posting. The goal is a readable, well-filled page with supported
+Tailoring selects, reorders and rewrites relevant evidence from all source
+resumes and confirmed profile facts. Existing TeX provides a layout, while the
+content is adapted to the posting. The goal is a readable, well-filled page with supported
 accomplishments and their context intact. When text overflows, CVPilot measures
 the excess and first rewords wrapped bullets (for example, a short second-line
 spillover back onto one line). Refinement preserves bullets, entries, dates and
@@ -40,6 +41,25 @@ metrics; it does not delete sections or shrink typography to force a fit.
 If a first draft leaves substantial unused space and sources contain omitted
 evidence, it requests relevant context back. Sparse sources are not padded with
 filler. A one-page count alone is not treated as proof of a good resume.
+If only a small amount of optional page filling remains and repeated proposals
+would damage facts or layout, CVPilot retains the substantially filled, validated
+one-page draft with an explicit warning. It still refuses multi-page output or
+large losses of useful context.
+
+Before generating TeX, CVPilot reviews the posting against all sources and
+confirmed profile facts. If important qualifications need clarification, the
+job pauses as `needs-input` and asks focused questions in Discord and
+`/cvpilot status`. It releases the queue while waiting. Answer with `/cvpilot answer
+job_id:<id> question:<number> details:<your actual experience>`. Review the exact
+statement, choose **Save to profile**, and type **CONFIRM** within 2 minutes.
+Only your statement is added as user-confirmed experience; the bot does not
+infer proficiency, dates or achievements. Decline by leaving it unanswered or
+cancelling; unsupported qualifications stay out. Once the profile-save job
+completes, run `/cvpilot continue job_id:<original job>` to resume with the new
+fact. You can also continue without answers; unknown qualifications remain
+unconfirmed and stay out. The same tailoring job ID is retained. Answers
+work in server commands and DMs with the same current-role checks. Master
+resume files remain unchanged; a normal revert can undo the profile commit.
 
 Each request keeps its permanent job ID (for example, `#20`) and also shows
 its current position among all pending CVPilot jobs, the number ahead of it,

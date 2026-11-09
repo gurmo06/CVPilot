@@ -64,6 +64,18 @@ class Store:
     def recover(self):
         with self.tx() as c:
             c.execute("UPDATE jobs SET state='queued',started_at=NULL WHERE state='running'")
+    def resume_tailor(self,uid,jid,signature):
+        import json
+        with self.tx() as c:
+            row=c.execute('SELECT * FROM jobs WHERE id=? AND discord_id=?',(jid,uid)).fetchone()
+            if not row or row['kind']!='tailor' or row['state']!='needs-input':
+                raise ValueError('Only a tailoring job awaiting answers can be continued.')
+            cutoff=c.execute("SELECT COALESCE(MAX(id),0) FROM jobs WHERE discord_id=? AND kind='reset' AND state='done'",(uid,)).fetchone()[0]
+            if jid<=cutoff:raise ValueError('This review predates your last reset. Submit a new tailor request.')
+            if c.execute("SELECT 1 FROM jobs WHERE discord_id=? AND state IN ('queued','running')",(uid,)).fetchone():
+                raise ValueError('Wait for your queued/running jobs, including profile saves, before continuing.')
+            data=json.loads(row['payload']);data['accepted_review']=signature
+            c.execute("UPDATE jobs SET state='queued',payload=?,started_at=NULL,finished_at=NULL,error=NULL,result=NULL WHERE id=?",(json.dumps(data),jid))
     def user(self, uid):
         with closing(self.connection()) as c:
             x=c.execute('SELECT * FROM users WHERE discord_id=?',(uid,)).fetchone()

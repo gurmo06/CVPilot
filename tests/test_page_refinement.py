@@ -76,6 +76,28 @@ class MeasurementTests(unittest.TestCase):
         self.assertTrue(new.startswith(old.split('Long bullet.')[0]))
         self.assertIn('Short bullet.',new);self.assertNotIn('Changed name',new)
 
+    def test_document_wrappers_are_extracted_and_returned_preamble_is_never_applied(self):
+        for body in ('\\begin{document}\nConcise resume content.\n\\end{document}',
+                     '\\documentclass[7pt]{article}\n\\usepackage[margin=0in]{geometry}\n\\begin{document}\nConcise resume content.\n\\end{document}'):
+            new,_=fit.parse_revision(revision(body),TEX)
+            self.assertTrue(new.startswith('\\documentclass[10pt]{article}'))
+            self.assertNotIn('margin=0in',new);self.assertEqual(new.count('\\begin{document}'),1)
+        with self.assertRaises(fit.RevisionRejected):fit.parse_revision(revision('\\begin{document}Incomplete'),TEX)
+
+    def test_restoration_can_repeat_the_existing_custom_list_style(self):
+        old=TEX.replace('\\begin{document}',r'\newenvironment{resitems}{\begin{itemize}[leftmargin=*]}{\end{itemize}}'+'\n\\begin{document}')
+        body=r'\begin{resitems}\item Original resume content.\end{resitems}'
+        old=old.replace('Original resume content.',body)
+        restored=body+r'\begin{resitems}\item Additional supported experience.\end{resitems}'
+        new,_=fit.parse_revision(revision(restored),old,allow_additions=True)
+        self.assertIn('Additional supported experience.',new)
+
+    def test_typographic_hyphens_do_not_falsely_change_project_identity(self):
+        body=r'\projline{https://example.test/project}{Self-Hosted Project}{Existing tools}{2026}'
+        old=TEX.replace('Original resume content.',body)
+        new,_=fit.parse_revision(revision(body.replace('Self-Hosted','Self\u2011Hosted')),old)
+        self.assertIn('Self\u2011Hosted',new)
+
     def test_uniform_body_escaping_is_corrected_without_damaging_real_row_breaks(self):
         body=r'\begin{center}Name\\[2pt]Contact\end{center}'+'\n'+r'\ressection{Experience}\begin{itemize}\item Original words.\end{itemize}'
         old=TEX.replace('Original resume content.',body)
@@ -293,6 +315,15 @@ class RefinementLoopTests(unittest.TestCase):
         self.richer_sources()
         self.assertEqual(self.run_fit([None],[self.one_page(705)],[]),{'rounds':0,'pages':1})
         self.worker.agent_completion.assert_not_called()
+
+    def test_small_optional_fill_stall_retains_valid_one_page_with_an_explicit_warning(self):
+        self.richer_sources()
+        m=self.one_page(640)  # 80 pt spare; 4 optional lines beyond normal breathing room.
+        result=self.run_fit([None]*4,[m]*4,[revision('Original resume content.')]*3)
+        self.assertEqual(result['pages'],1);self.assertIn('best validated one-page draft',result['warning'])
+        self.assertEqual(self.tex.read_text(),TEX)
+        record=json.loads((self.root/'job-refinements'/UID/'35.json').read_text())
+        self.assertEqual(record['status'],'fits_with_space')
 
     def test_missing_optional_notes_preserve_previous_notes_in_the_fitting_result(self):
         report={'final':'```cvpilot-resume-body\nConcise resume content.\n```'}

@@ -169,6 +169,8 @@ class JobStatusTests(unittest.TestCase):
               mock.patch.object(worker,'new_worktree',return_value=(task,'main')),
               mock.patch.object(worker,'stage_agent_task',return_value=task),
               mock.patch.object(worker,'validate_agent_task'),
+              mock.patch.object(worker,'review_qualifications',return_value=[]),
+              mock.patch.object(worker,'run_git',return_value='a'*40),
               mock.patch.object(worker,'run',return_value=json.dumps(response)) as agent,
               mock.patch.object(main_commits,'recover',return_value=None),
               mock.patch.object(main_commits,'begin',return_value={'base':'a'*40}),

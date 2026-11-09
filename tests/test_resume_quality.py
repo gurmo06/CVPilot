@@ -45,10 +45,11 @@ class ResumeQualityTests(unittest.TestCase):
             fit.parse_revision(revision(restored.replace('\\begin{itemize}','\\begin{itemize}[nosep]',1)),reference,allow_additions=True)
 
     def test_shared_policy_prioritizes_wrapped_wording_context_and_source_support(self):
-        for phrase in ('smallest necessary edits','two-line bullet','action, scope/method/tools',
+        for phrase in ('select, reorder, combine and rewrite','two-line bullet','action, scope/method/tools',
                        'Use the whole usable page','not delete that many source lines or bullets',
-                       'not establish API, database or cloud experience'):
+                       'Never infer a new qualification solely from related experience'):
             self.assertIn(phrase,POLICY)
+        self.assertNotIn('smallest necessary edits',POLICY)
 
 
 if __name__=='__main__':unittest.main()

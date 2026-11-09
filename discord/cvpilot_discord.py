@@ -170,6 +170,8 @@ async def help_command(interaction: discord.Interaction):
         '**Profile and history**\n'
         '`/cvpilot profile show` | `/cvpilot profile sync`\n'
         '`/cvpilot profile edit instructions:<facts>`\n'
+        '`/cvpilot answer job_id:<id> question:<n> details:<experience>` — Review and confirm a profile fact.\n'
+        '`/cvpilot continue job_id:<id>` — Resume after reviewing qualification questions.\n'
         '`/cvpilot history limit:<1–10>` — Main commits.\n'
         '`/cvpilot revert commit:<ID>` — Undo one commit; type REVERT.\n'
         '`/cvpilot reset` — Restore template and delete other branches; type RESET.\n'
@@ -211,6 +213,11 @@ class RevertModal(ResetModal, title='Confirm commit revert'):
 class DeleteModal(ResetModal, title='Confirm resume deletion'):
     verification=discord.ui.TextInput(label='Type DELETE to delete this resume',placeholder='DELETE',
                                       min_length=6,max_length=6,required=True)
+
+
+class AnswerModal(ResetModal, title='Confirm profile experience'):
+    verification=discord.ui.TextInput(label='Type CONFIRM to save your statement',placeholder='CONFIRM',
+                                      min_length=7,max_length=7,required=True)
 
 
 class ResetView(discord.ui.View):
@@ -283,6 +290,16 @@ class MasterDeleteView(ResetView):
 
 class ApplicationDeleteView(MasterDeleteView):
     action='application-delete'
+
+
+class AnswerView(ResetView):
+    action='answer'
+    modal_type=AnswerModal
+
+    @discord.ui.button(label='Save to profile',style=discord.ButtonStyle.primary)
+    async def confirm(self,interaction:discord.Interaction,button:discord.ui.Button):
+        if not await self.interaction_check(interaction):return
+        await interaction.response.send_modal(self.modal_type(self))
 
 
 async def prepare_repository_change(interaction, action, view_type, **args):
@@ -430,6 +447,19 @@ async def status(interaction: discord.Interaction, job_id: int | None = None):
 @app_commands.describe(url='Full HTTPS URL for the job posting')
 async def tailor(interaction: discord.Interaction, url: str):
     await invoke(interaction, 'tailor', url=url)
+
+
+@cvpilot.command(name='answer',description='Answer a tailoring question and review a fact before saving it to your profile')
+@app_commands.describe(job_id='Tailoring job that asked the question',question='Question number shown in the job status',
+                       details='Describe your actual experience in your own words; no skill is assumed from yes/no')
+async def answer(interaction:discord.Interaction,job_id:int,question:app_commands.Range[int,1,3],details:str):
+    await prepare_repository_change(interaction,'answer',AnswerView,job_id=job_id,question=question,details=details)
+
+
+@cvpilot.command(name='continue',description='Continue a tailoring job after reviewing its qualification questions')
+@app_commands.describe(job_id='Your tailoring job awaiting answers; unanswered qualifications stay unconfirmed')
+async def continue_tailoring(interaction:discord.Interaction,job_id:int):
+    await invoke(interaction,'continue',job_id=job_id)
 
 @cvpilot.command(name='download', description='Download your completed resume files privately as attachments')
 @app_commands.describe(job_id='Your completed job ID; omit to download your latest resume')
@@ -618,14 +648,14 @@ if __name__ == '__main__':
     import sys
     if '--check' in sys.argv:
         names = {cmd.qualified_name for cmd in cvpilot.walk_commands()}
-        expected = {'cvpilot help', 'cvpilot init', 'cvpilot repo', 'cvpilot status', 'cvpilot tailor', 'cvpilot download', 'cvpilot reset', 'cvpilot history', 'cvpilot revert',
+        expected = {'cvpilot help', 'cvpilot init', 'cvpilot repo', 'cvpilot status', 'cvpilot tailor', 'cvpilot answer', 'cvpilot continue', 'cvpilot download', 'cvpilot reset', 'cvpilot history', 'cvpilot revert',
                     'cvpilot master get', 'cvpilot master edit', 'cvpilot master upload', 'cvpilot master delete', 'cvpilot application delete',
                     'cvpilot profile show', 'cvpilot profile sync', 'cvpilot profile edit',
                     'cvpilot settings master_edit'}
         missing = expected - names
         if missing:
             raise SystemExit('Missing native subcommands: ' + ', '.join(sorted(missing)))
-        print('OK: 18 server/DM CVPilot subcommands and 4 server-only admin diagnostics defined')
+        print('OK: 20 server/DM CVPilot subcommands and 4 server-only admin diagnostics defined')
         sys.exit(0)
     if not TOKEN or TOKEN == 'REPLACE_WITH_TOKEN':
         raise SystemExit('Set CVPILOT_DISCORD_TOKEN in ~/.config/cvpilot/controller.env')

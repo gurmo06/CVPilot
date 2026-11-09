@@ -88,6 +88,10 @@ def build(w, uid, repo, kind, jid, payload=None, draft=None):
         if url:details.append(f'Job posting: {url}')
     elif kind=='profile-sync':summary='Sync profile and source records from master resumes'
     elif kind=='profile-edit':summary='Update verified profile facts'
+    elif kind=='profile-confirm':
+        summary='Save user-confirmed '+single_line(payload.get('term','experience'),65)
+        details.extend([f'Follow-up to job {payload.get("source_job")}, question {payload.get("question")}.',
+                        'Confirmed statement: '+single_line(payload.get('statement',''),1200)])
     elif kind=='init':summary='Initialize CVPilot workspace'
     elif kind=='reset':
         summary='Reset workspace to initial template'

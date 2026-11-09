@@ -14,10 +14,18 @@ profile and masters are read-only; do not
 return profile JSON. Use current master evidence directly even if the profile
 is empty or outdated. Use profile facts only when user-confirmed or cited to
 current source hashes; corroborate stale facts in current masters. Profile
-updates belong to /cvpilot profile sync. Do not use filesystem tools or run Git.
+updates belong to profile sync or an explicit user-confirmed answer. Do not use filesystem tools or run Git.
 The worker saves files at fixed job paths, verifies read-only inputs, compiles
 the one-page PDF and commits validated changes to main. For other tasks, follow
 their explicit task instructions and use complete absolute sandbox paths.
+
+Before drafting, a separate qualification-review task requests only a small
+question assessment. Compare the important posting requirements with all
+sources and confirmed facts; ask about material gaps without inferring new
+skills or inventing posting requirements. Do not generate TeX for that stage.
+If questions are returned, the worker pauses and asks the user in Discord.
+After answers are saved, /cvpilot continue resumes the same job. Qualifications
+left unanswered remain unconfirmed and must not be inserted into the resume.
 
 Start initial notes with `Company: <employer>` and `Position: <exact title>`
 copied from the posting; use Unknown if unavailable. Keep these headers in
@@ -37,16 +45,28 @@ ampersands only for table alignment. The controller may retry compilation once
 after narrowly correcting generated syntax. The final output must be a readable,
 well-filled single page; do not aggressively cut the first draft to guarantee it.
 
-Follow the worker's shared RESUME QUALITY POLICY in both stages. Start with the
-closest master and preserve its unaffected wording, entries and formatting.
-Improve relevance using evidence, not a blanket rewrite. Use the whole usable
+Follow the worker's shared RESUME QUALITY POLICY in both stages. Initial
+tailoring should actively select, reorder and rewrite relevant evidence from
+all masters and confirmed profile facts. An existing layout is a starting point,
+not a restriction to cosmetic edits of that master. Preserve factual meaning
+and useful context. Only the later page-fit step is limited to conservative
+wording edits. Use the whole usable
 page with supported meaningful detail and normal bottom breathing room. Keep
 action, scope/method and outcome/metrics together so bullets remain useful.
-Target short spillovers in wrapped bullets first: reword two lines into one or
+When fitting overflow, target short spillovers in wrapped bullets first: reword two lines into one or
 three into two when the meaning survives. Keep already concise bullets intact.
 Do not force every bullet onto one line, replace context with cryptic fragments,
 or infer qualifications from adjacent technologies. Explain initial substantive
 omissions/replacements and name the baseline in notes.
+
+When an important requirement lacks evidence, ask a focused question about the
+person's actual experience rather than assuming it or silently ignoring it.
+Return up to three questions in the pre-draft assessment. Check all
+sources and confirmed facts first; avoid questions about incidental keywords
+or already documented qualifications. The worker delivers the questions in
+Discord. `/cvpilot answer` previews the person's own statement and requires
+CONFIRM before a separate trusted job saves it as a profile fact. Tailoring
+itself still cannot modify the profile, invent answers or fabricate confirmations.
 
 For page-fit refinements, follow the worker's measured line-reduction target.
 It reports overflow rows, available first-page space and the net number of body

@@ -143,7 +143,6 @@ def parse_revision(report,reference,*,allow_additions=False):
     blocks=revision_blocks(text.replace('\r\n','\n'))
     body=blocks['cvpilot-resume-body'];notes=blocks.get('cvpilot-notes','')
     if len(body.encode())>250000 or len(notes.encode())>16000:raise RevisionRejected('Refinement output exceeds size limits')
-    if re.search(r'\\(?:documentclass\b|(?:begin|end)\{document\})',body):raise RevisionRejected('Return only the document body, without document markers or preamble')
     if any(ord(char)<32 and char not in '\n\t' for char in body):raise RevisionRejected('Invalid control characters in revised TeX')
     # The body-only protocol can exhibit the same uniform double escaping as
     # a full generated document. Require doubled structural controls and even
@@ -152,6 +151,9 @@ def parse_revision(report,reference,*,allow_additions=False):
     structural=re.search(r'(?<!\\)\\\\(?:ressection\{|begin\{)',body)
     if structural and runs and all(len(match[0])%2==0 for match in runs):
         body=re.sub(r'\\+',lambda match:'\\'*(len(match[0])//2),body)
+    if re.search(r'\\(?:documentclass\b|(?:begin|end)\{document\})',body):
+        # Extract only a uniquely bounded body; returned preambles never apply.
+        _,body,_=document_parts(body)
     prefix,old_body,suffix=document_parts(reference)
     # Common resume section macros give an exact boundary after the identity
     # header. Retain that header byte-for-byte when the template exposes it.
@@ -165,8 +167,11 @@ def parse_revision(report,reference,*,allow_additions=False):
     if allow_additions:
         # Restoring an omitted entry may repeat an existing list style. It may
         # not introduce new list options or any font/spacing/layout operation.
+        lists={'itemize','enumerate','description'}
+        lists.update(re.findall(r'\\(?:newenvironment|renewenvironment)\s*\{([^}]+)\}\s*\{\s*\\begin\{(?:itemize|enumerate|description)\}',_masked(prefix)))
+        list_call=re.compile(r'\\begin\{(?:'+'|'.join(re.escape(name) for name in lists)+r')\}')
         additions=Counter({key:value for key,value in additions.items()
-            if not (key in before and re.match(r'\\begin\{(?:itemize|enumerate|description)\}',key))})
+            if not (key in before and list_call.match(key))})
     if additions or {key:value for key,value in before.items() if FONT_CALL.match(key)}!={key:value for key,value in after.items() if FONT_CALL.match(key)}:
         raise RevisionRejected('Revision changed fonts, spacing, page layout, or introduced formatting controls; revise content only')
     removed=lost_content(_masked(old_body),_masked(body))
@@ -326,5 +331,14 @@ def fit(w,job,store,task,tex,inputs,posting,initial_response,deadline,*,allow_mo
         except Exception as exc:
             fail(round_no,str(exc));raise
         if stalled>=MAX_STALLED:
+            if (metrics['pages']==1 and 0<metrics.get('fill_target_lines',0)<=4
+                    and metrics['first_page_spare_pt']<=.12*metrics['text_height_pt']):
+                # A small optional fill improvement must not turn an already
+                # validated, substantially filled PDF into a failed job. Keep
+                # the fuller safe draft and expose the remaining space honestly.
+                restore()
+                warning=f'Kept the best validated one-page draft; about {metrics["fill_target_lines"]} extra lines of useful context could not be restored safely. No facts or typography were sacrificed to fill that small remaining space.'
+                save(round_no,best_report,metrics,'fits_with_space',warning)
+                return {'rounds':round_no,'pages':1,'warning':warning}
             raise fail(round_no,f'Page refinement stalled after {stalled} rejected/non-improving revisions; best draft still needs {needed(metrics)}. {feedback} Drafts retained; no changes published.','stalled')
     raise fail(MAX_ROUNDS,f'Page refinement reached {MAX_ROUNDS} revisions; best draft still needs {needed(metrics)}. Drafts retained; no changes published.','round_limit')

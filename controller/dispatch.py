@@ -6,7 +6,7 @@ from queue_status import acknowledgement, status
 
 UID_RE=re.compile(r'^[0-9]{16,22}$')
 USERNAME_RE=re.compile(r'^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$')
-ALLOWED={'init','repo','settings','status','tailor','master','profile','answer','download','reset','history','revert','master-delete','application-delete'}
+ALLOWED={'init','repo','settings','status','tailor','continue','master','profile','answer','download','reset','history','revert','master-delete','application-delete'}
 
 RESET_CONFIRM_TTL=120
 _RESET_CONFIRMATIONS={}
@@ -140,7 +140,11 @@ def process(req, store):
             return acknowledgement(store,uid,jid,f'Profile update queued as #{jid}. Unverified additions will require confirmation.')
         raise ValueError('Usage: /cvpilot profile show | sync | edit instructions:TEXT')
     if action=='answer':
-        raise ValueError('Skill confirmation follow-ups are not yet implemented; run a new /cvpilot tailor after updating your profile with confirmed facts.')
+        from qualifications import request
+        return request(uid,args,user,store)
+    if action=='continue':
+        from qualifications import continue_job
+        return continue_job(uid,args.get('job_id'),store)
     raise ValueError('Unsupported operation')
 
 class UnixHandler(socketserver.StreamRequestHandler):
