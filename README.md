@@ -20,7 +20,7 @@ included.
 
 ## Get started
 
-1. [Join the Discord server](https://discord.gg/N2KNhvNm) and obtain the
+1. [Join the Discord server](https://discord.gg/tMMPgSbg6V) and obtain the
    server-issued CVPilot User role. Commands work in the designated channel and
    in DMs with the bot. Current membership and role permissions are checked for
    every request. Group DMs are unsupported.
@@ -338,5 +338,5 @@ format rather than a guaranteed end-to-end result for every job. Generated
 PDFs are excluded from source synchronization.
 
 Feedback and bug reports are welcome through the project or
-[Discord community](https://discord.gg/N2KNhvNm). Source reuse is subject to an
+[Discord community](https://discord.gg/tMMPgSbg6V). Source reuse is subject to an
 applicable license; public availability alone does not grant reuse rights.
