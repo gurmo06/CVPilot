@@ -64,10 +64,13 @@ def publish(w, job, store, draft=None):
             if w.run_git(uid,trusted,'diff','--cached','--name-only'):
                 if 'commit_message' not in record:
                     record['commit_message']=commit_messages.build(w,uid,trusted,job['kind'],jid,
-                        json.loads(job['payload']),record['draft'])
+                        json.loads(job['payload']),record['draft'],coauthor=commit_messages.coauthor(w,uid))
                     # Recovery checks the exact persisted message after a crash;
                     # it never regenerates metadata from a different snapshot.
                     w._write_intent(journal_path(w,job),record)
+                # Recovery can reach a previously prepared checkout without
+                # new_worktree; apply the configured identity to new commits.
+                commit_messages.configure_identity(w,uid,trusted)
                 commit_messages.commit(w,uid,trusted,record['commit_message'])
                 head=w.run_git(uid,trusted,'rev-parse','HEAD')
         else:

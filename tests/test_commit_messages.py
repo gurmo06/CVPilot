@@ -22,6 +22,68 @@ class CommitMessageTests(unittest.TestCase):
     def message(self,oid):
         return self.flow.git('-C',str(self.fixture.remote),'show','-s','--format=%B',oid)
 
+    def configure_bot(self):
+        config={'schema_version':1,
+                'bot':{'display_name':'Example Bot','github_username':'example-bot','github_id':4242,
+                       'registration_email':'private-contact@example.invalid'},
+                'coauthors':{UID:{'display_name':'Example User','github_username':'example-user','github_id':4343}}}
+        path=worker.ROOT/'git-identity.json';path.write_text(json.dumps(config));path.chmod(0o600)
+        return config,path
+
+    def test_owned_bot_and_scoped_coauthor_are_saved_in_actual_commit_metadata(self):
+        self.configure_bot();before=self.flow.main()
+        _,result=self.flow.upload('teaching')
+        identity=self.flow.git('-C',str(self.fixture.remote),'show','-s','--format=%an%n%ae%n%cn%n%ce',result['commit'])
+        self.assertEqual(identity,'Example Bot\n4242+example-bot@users.noreply.github.com\nExample Bot\n4242+example-bot@users.noreply.github.com')
+        message=self.message(result['commit'])
+        self.assertTrue(message.endswith('\n\nCo-authored-by: Example User <4343+example-user@users.noreply.github.com>'))
+        self.assertEqual(message.count('\nCo-authored-by:'),1)
+        self.assertNotIn('private-contact@',message+identity)
+        self.assertNotIn('git-identity.json',self.flow.git('-C',str(self.fixture.remote),'ls-tree','-r','--name-only','main'))
+        self.assertEqual(self.flow.git('-C',str(self.fixture.remote),'rev-parse','main^'),before)
+
+    def test_configured_coauthor_is_not_assigned_to_other_discord_users(self):
+        self.configure_bot()
+        self.assertIsNone(commit_messages.coauthor(worker,fixtures.OTHER))
+        self.assertEqual(commit_messages.coauthor(worker,UID),'Example User <4343+example-user@users.noreply.github.com>')
+
+    def test_invalid_identity_records_are_rejected_before_any_git_configuration(self):
+        config,path=self.configure_bot()
+        variants=[]
+        for key,value in [('github_id',0),('github_id',True),('github_id','4242'),
+                          ('github_username','../another-account'),('github_username',''),
+                          ('display_name','Bot\nCo-authored-by: Someone'),('display_name','Bot <fake>')]:
+            bad=json.loads(json.dumps(config));bad['bot'][key]=value;variants.append(bad)
+        bad=json.loads(json.dumps(config));bad['coauthors']={'not-a-discord-id':config['coauthors'][UID]};variants.append(bad)
+        bad=json.loads(json.dumps(config));bad['coauthors'][UID]['display_name']='User\nForged: value';variants.append(bad)
+        variants.extend([{'schema_version':2},[],{'schema_version':1,'bot':None}])
+        with mock.patch.object(worker,'run_git') as git:
+            for bad in variants:
+                with self.subTest(bad=bad):
+                    path.write_text(json.dumps(bad))
+                    with self.assertRaises(ValueError):commit_messages.configure_identity(worker,UID,'repo')
+            git.assert_not_called()
+
+    def test_identity_file_symlinks_and_invalid_json_are_rejected(self):
+        _,path=self.configure_bot();outside=self.fixture.root/'other-identity.json';outside.write_text('{}')
+        path.unlink();path.symlink_to(outside)
+        with self.assertRaisesRegex(ValueError,'regular file'):commit_messages.identities(worker)
+        path.unlink();path.write_text('{incomplete')
+        with self.assertRaisesRegex(ValueError,'invalid JSON'):commit_messages.identities(worker)
+
+    def test_configured_bot_and_coauthor_apply_to_confirmed_reset(self):
+        self.configure_bot()
+        preview=self.flow.call('reset')
+        self.flow.call('reset',{'operation':'confirm','token':preview['confirmation_token'],'confirmation':'RESET'})
+        job=self.store.claim()
+        with mock.patch('reset_repo.verified_origin',return_value=str(self.fixture.remote)):
+            result=worker.work(job,self.store)
+        self.store.finish(job['id'],'done',result)
+        identity=self.flow.git('-C',str(self.fixture.remote),'show','-s','--format=%an%n%ae%n%cn%n%ce',result['commit'])
+        self.assertEqual(identity,'Example Bot\n4242+example-bot@users.noreply.github.com\nExample Bot\n4242+example-bot@users.noreply.github.com')
+        self.assertIn('\n\nCo-authored-by: Example User <4343+example-user@users.noreply.github.com>',self.message(result['commit']))
+        self.assertEqual(worker.run_git(UID,worker.repopath(UID),'config','user.email'),'4242+example-bot@users.noreply.github.com')
+
     def test_upload_identifies_label_formats_and_added_files(self):
         _,result=self.flow.upload('teaching');message=self.message(result['commit'])
         self.assertIn('Upload master teaching (PDF + TeX)',message.splitlines()[0])
@@ -30,6 +92,17 @@ class CommitMessageTests(unittest.TestCase):
         self.assertIn('Added: master-resumes/teaching/resume.pdf',message)
         self.assertIn('Added: master-resumes/teaching/resume.tex',message)
         self.assertNotIn(attachments.TEX.decode(),message)
+
+    def test_upload_replaces_legacy_email_for_new_commits_and_preserves_history(self):
+        repo=worker.repopath(UID)
+        self.flow.git('-C',str(repo),'config','user.email','cvpilot@users.noreply.github.com')
+        before=self.flow.main()
+        old=self.flow.git('-C',str(self.fixture.remote),'show','-s','--format=%H%n%an%n%ae%n%cn%n%ce',before)
+        _,result=self.flow.upload('teaching')
+        identity=self.flow.git('-C',str(self.fixture.remote),'show','-s','--format=%an%n%ae%n%cn%n%ce',result['commit'])
+        self.assertEqual(identity,'CVPilot\ncvpilot@cvpilot.invalid\nCVPilot\ncvpilot@cvpilot.invalid')
+        self.assertEqual(self.flow.git('-C',str(self.fixture.remote),'rev-parse','main^'),before)
+        self.assertEqual(self.flow.git('-C',str(self.fixture.remote),'show','-s','--format=%H%n%an%n%ae%n%cn%n%ce',before),old)
 
     def test_pdf_only_replacement_explains_update_and_tex_removal(self):
         self.flow.upload('general')
@@ -98,6 +171,7 @@ class CommitMessageTests(unittest.TestCase):
         self.assertEqual(self.flow.git('-C',str(self.fixture.remote),'rev-list','--count','main'),'2')
 
     def test_recovery_after_message_journal_or_commit_preserves_full_message(self):
+        self.configure_bot()
         for phase in ('message','commit'):
             with self.subTest(phase=phase):
                 self.store.enqueue(UID,'profile-edit',{'instructions':'Add verified '+phase});job=self.store.claim()
@@ -115,6 +189,7 @@ class CommitMessageTests(unittest.TestCase):
                     with self.assertRaises(SystemExit):worker.work(job,self.store)
                 record=main_commits.load(worker,job,self.store)
                 expected=record['commit_message']
+                self.assertEqual(expected.count('\nCo-authored-by:'),1)
                 with mock.patch.object(worker,'run_resume_job',side_effect=AssertionError('No model rerun')):
                     recovered=main_commits.recover(worker,job,self.store)
                 self.assertEqual(self.message(recovered['commit']),expected)

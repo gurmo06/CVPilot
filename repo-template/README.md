@@ -66,14 +66,19 @@ its current position among all pending CVPilot jobs, the number ahead of it,
 and total running/waiting work. Running jobs count ahead of waiting jobs;
 finished and failed jobs are excluded. Queue positions are shared across users,
 but only aggregate counts are shown for other users. `/cvpilot status` refreshes
-these positions and prioritizes your active jobs. Earlier confirmation messages
-show the queue snapshot at the time they were sent. No duration estimate is implied.
+the selected job's position and defaults to your newest job. Supply `job_id` to
+select a job directly, or use the older/newer arrows to browse your history.
+Refresh updates that one job; its view includes timing, checkpoints, errors and
+an attached full report. Earlier confirmation messages show the queue snapshot
+at the time they were sent. No duration estimate is implied.
 
 There is no fixed list of career categories. Labels are user-defined lowercase
 names (letters, numbers, hyphens; start with a letter; up to 40 characters).
 Reusing a label explicitly replaces its active uploaded version; earlier
 versions remain in Git history. Upload a matching PDF/TeX pair together so the
 bot does not combine files from different versions.
+Uploading under a different label removes the untouched `general` starter
+folder; uploaded resumes and customized files in `general` are preserved.
 
 ## Files and commit history
 
@@ -87,6 +92,14 @@ bot does not combine files from different versions.
 
 Successful uploads, resume edits, tailored applications and profile changes
 commit directly to `main` after validation. CVPilot creates no per-job branches.
+The operator can configure an owned GitHub bot and optional co-authors in private
+runtime configuration. Commits use that bot's display name and ID-based GitHub
+noreply address; co-author credit is limited to explicitly configured users.
+Without this configuration, the fallback is `CVPilot <cvpilot@cvpilot.invalid>`,
+an unlinked automation label that does not provide GitHub contribution credit.
+Never invent an address under `users.noreply.github.com` or assume that setting
+a Git author name creates an account. Registration email addresses stay private.
+Changing the identity for future commits leaves existing commit IDs unchanged.
 New commit titles identify the operation, master label or application, and
 resume formats when relevant. Each commit body lists the exact added, updated
 and deleted files. Revert titles keep the original commit ID and explain the

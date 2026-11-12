@@ -151,6 +151,9 @@ class ResetWorkflowTests(unittest.TestCase):
         user=self.store.user(UID)
         job=self.claim_reset();result=self.finish_reset(job)
         self.assertTrue(result['reset'])
+        self.assertEqual(self.git('-C',str(self.remote),'show','-s','--format=%an%n%ae%n%cn%n%ce',result['commit']),
+                         'CVPilot\ncvpilot@cvpilot.invalid\nCVPilot\ncvpilot@cvpilot.invalid')
+        self.assertEqual(worker.run_git(UID,worker.repopath(UID),'config','user.email'),'cvpilot@cvpilot.invalid')
         self.assertEqual(self.git('-C',str(self.remote),'for-each-ref','--format=%(refname)','refs/heads'),'refs/heads/main')
         self.assertEqual(worker.run_git(UID,worker.repopath(UID),'for-each-ref','--format=%(refname)','refs/heads'),'refs/heads/main')
         actual=set(self.git('-C',str(self.remote),'ls-tree','-r','--name-only','main').splitlines())

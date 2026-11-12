@@ -1,5 +1,6 @@
 """Confirmed repository reset, with atomic remote updates and private recovery data."""
 import json
+import commit_messages
 from pathlib import Path
 import re
 import secrets
@@ -50,8 +51,7 @@ def remote_heads(w, uid, repo):
 
 def template_commit(w, uid, repo, old_main, folder, jid):
     w.run_git(uid,repo,'worktree','add','--detach',str(folder),old_main)
-    w.run_git(uid,folder,'config','user.name','CVPilot')
-    w.run_git(uid,folder,'config','user.email','cvpilot@users.noreply.github.com')
+    commit_messages.configure_identity(w,uid,folder)
     w.run_git(uid,folder,'rm','-r','-f','--ignore-unmatch','--','.')
     template=w.KIT/'repo-template'
     if not template.is_dir() or template.is_symlink():raise ValueError('Initial repository template is unavailable')
@@ -65,7 +65,7 @@ def template_commit(w, uid, repo, old_main, folder, jid):
     if not count:raise ValueError('Initial repository template is empty')
     w.run_git(uid,folder,'add','-f','-A','--','.')
     from commit_messages import build,commit
-    message=build(w,uid,folder,'reset',jid)
+    message=build(w,uid,folder,'reset',jid,coauthor=commit_messages.coauthor(w,uid))
     commit(w,uid,folder,message,allow_empty=True)
     return w.run_git(uid,folder,'rev-parse','HEAD')
 
@@ -130,8 +130,7 @@ def reset_repository(job,store):
         w.run(['git','clone','--single-branch','--branch','main',origin,str(staging)],env=w.git_env(uid),timeout=120)
         if w.run_git(uid,staging,'rev-parse','HEAD')!=new_main:
             raise ValueError('Main changed before local reset completed; confirm a fresh reset')
-        w.run_git(uid,staging,'config','user.name','CVPilot')
-        w.run_git(uid,staging,'config','user.email','cvpilot@users.noreply.github.com')
+        commit_messages.configure_identity(w,uid,staging)
         if repo.exists():
             if archived.exists():raise ValueError('Reset checkout backup already exists')
             repo.rename(archived)

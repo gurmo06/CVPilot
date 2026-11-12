@@ -13,6 +13,9 @@ KIT=Path(__file__).resolve().parent.parent
 ORG=os.environ.get('CVPILOT_GITHUB_ORG','CV-Pilot')
 IMAGE=os.environ.get('CVPILOT_DOCKER_IMAGE','openclaw-career-sandbox:1')
 MODEL=os.environ.get('CVPILOT_MODEL','ollama/gpt-oss:20b')
+# Fallback automation label, not a GitHub account. Never guess a GitHub noreply
+# address: a matching address attributes our commits to its real account owner.
+GIT_IDENTITY_EMAIL='cvpilot@cvpilot.invalid'
 _HTTPS_USERS=set()
 
 
@@ -435,6 +438,7 @@ def _ensure_deploy_key(gh, name, uid, active_key):
 
 
 def repo_init(job,store):
+    import commit_messages,sys
     uid=job['discord_id']; github_user=json.loads(job['payload'])['github_username']
     old=store.user(uid)
     if old and old['repo']: return {'url':f'https://github.com/{old["repo"]}','note':'Already initialized'}
@@ -503,13 +507,12 @@ def repo_init(job,store):
         if file.is_file():
             target=repo/file.relative_to(KIT/'repo-template');target.parent.mkdir(parents=True,exist_ok=True)
             if not target.exists():shutil.copy2(file,target)
-    run_git(uid,repo,'config','user.name','CVPilot')
-    run_git(uid,repo,'config','user.email','cvpilot@users.noreply.github.com')
+    commit_messages.configure_identity(sys.modules[__name__],uid,repo)
     run_git(uid,repo,'add','-A')
     if run_git(uid,repo,'status','--porcelain'):
-        from commit_messages import build,commit
-        import sys
-        commit(sys.modules[__name__],uid,repo,build(sys.modules[__name__],uid,repo,'init',job['id']))
+        w=sys.modules[__name__]
+        message=commit_messages.build(w,uid,repo,'init',job['id'],coauthor=commit_messages.coauthor(w,uid))
+        commit_messages.commit(w,uid,repo,message)
         run_git(uid,repo,'push','origin','main')
     protection='enabled'
     protection_error=None
@@ -578,14 +581,14 @@ def provision_agent(uid,home):
     run(['openclaw','config','set','bindings',json.dumps(bindings),'--strict-json'],timeout=40)
 
 def new_worktree(uid,jid,kind):
+    import commit_messages,sys
     repo=repopath(uid);task=taskdir(uid,jid);trusted=gitworktree(uid,jid)
     task.parent.mkdir(parents=True,exist_ok=True)
     trusted.parent.mkdir(parents=True,exist_ok=True)
     run_git(uid,repo,'fetch','origin','main')
     if not trusted.exists():
         run_git(uid,repo,'worktree','add','--detach',str(trusted),'origin/main')
-    run_git(uid,trusted,'config','user.name','CVPilot')
-    run_git(uid,trusted,'config','user.email','cvpilot@users.noreply.github.com')
+    commit_messages.configure_identity(sys.modules[__name__],uid,trusted)
     # No Git metadata (.git) enters the model's mount. A plain-file work copy
     # prevents prompt-injected Git config, hooks, or repo credentials from being
     # reached or rewritten by the model.

@@ -149,6 +149,13 @@ class InitRecoveryTests(unittest.TestCase):
         self.assertEqual(result['main_protection'],'enabled')
         self.assertIsNone(result['main_protection_error'])
 
+    def test_init_configures_a_local_automation_identity_without_borrowing_a_github_account(self):
+        with mock.patch.object(worker,'run_git',side_effect=self.fake_run_git) as git:
+            worker.repo_init(self.job(),self.store)
+        git.assert_any_call(UID,worker.repopath(UID),'config','user.name','CVPilot')
+        git.assert_any_call(UID,worker.repopath(UID),'config','user.email','cvpilot@cvpilot.invalid')
+        self.assertNotIn('cvpilot@users.noreply.github.com',str(git.call_args_list))
+
     def test_plan_limitation_is_logged_and_saved_without_warning_in_success_message(self):
         error=github.GitHubAPIError(403,'PUT','/branches/main/protection',
                                   'Upgrade to GitHub Pro or make this repository public to enable this feature.')

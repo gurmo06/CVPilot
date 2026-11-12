@@ -1,8 +1,50 @@
 """Describe trusted staged changes without asking a model or reading resume content."""
+import json
 from pathlib import PurePosixPath
 import re
 import tempfile
 from urllib.parse import urlsplit, urlunsplit
+
+
+def github_identity(record):
+    """Use a verified account ID/login pair, never a guessed username email."""
+    if not isinstance(record,dict):raise ValueError('Invalid private Git identity record')
+    name=record.get('display_name');login=record.get('github_username');account_id=record.get('github_id')
+    if (not isinstance(name,str) or not name.strip() or len(name)>160
+            or any(ord(c)<32 or ord(c)==127 or c in '<>' for c in name)
+            or not isinstance(login,str) or not re.fullmatch(r'[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?',login)
+            or type(account_id) is not int or account_id<=0):
+        raise ValueError('Private Git identity needs a display name and verified GitHub username/account ID')
+    return {'name':name.strip(),'email':f'{account_id}+{login}@users.noreply.github.com'}
+
+
+def identities(w):
+    """Private operator configuration stays outside source and model input."""
+    path=w.ROOT/'git-identity.json'
+    if path.is_symlink():raise ValueError('Private Git identity configuration must be a regular file')
+    if not path.exists():return {'name':'CVPilot','email':w.GIT_IDENTITY_EMAIL},{}
+    if not path.is_file() or path.stat().st_size>1024*1024:
+        raise ValueError('Private Git identity configuration is invalid')
+    try:config=json.loads(path.read_text(encoding='utf-8'))
+    except (ValueError,UnicodeError) as exc:raise ValueError('Private Git identity configuration contains invalid JSON') from exc
+    if not isinstance(config,dict) or config.get('schema_version')!=1:
+        raise ValueError('Unsupported private Git identity configuration')
+    bot=github_identity(config.get('bot'));configured=config.get('coauthors',{})
+    if (not isinstance(configured,dict) or any(not re.fullmatch(r'[0-9]{16,22}',uid) for uid in configured)):
+        raise ValueError('Private Git co-authors must be bound to explicit Discord user IDs')
+    return bot,{uid:github_identity(record) for uid,record in configured.items()}
+
+
+def configure_identity(w, uid, repo):
+    bot,_=identities(w)
+    w.run_git(uid,repo,'config','user.name',bot['name'])
+    w.run_git(uid,repo,'config','user.email',bot['email'])
+
+
+def coauthor(w, uid):
+    _,users=identities(w)
+    record=users.get(uid)
+    return f'{record["name"]} <{record["email"]}>' if record else None
 
 
 def commit(w, uid, repo, message, *, allow_empty=False):
@@ -63,7 +105,7 @@ def inverse_summary(changes):
     return ', '.join(phrases[:2])+(f' and {len(phrases)-2} more areas' if len(phrases)>2 else '')
 
 
-def build(w, uid, repo, kind, jid, payload=None, draft=None):
+def build(w, uid, repo, kind, jid, payload=None, draft=None, *, coauthor=None):
     payload=payload or {};draft=draft or {};changes=staged_changes(w,uid,repo)
     formats=resume_formats(changes)
     label=single_line(draft.get('label') or payload.get('role') or payload.get('label') or 'general',40)
@@ -113,4 +155,5 @@ def build(w, uid, repo, kind, jid, payload=None, draft=None):
     for status,path in changes:
         action={'A':'Added','D':'Deleted'}.get(status,'Updated')
         details.append(f'{action}: {display_path(path)}')
-    return subject+'\n\n'+'\n'.join(details)
+    message=subject+'\n\n'+'\n'.join(details)
+    return message+('\n\nCo-authored-by: '+coauthor if coauthor else '')
