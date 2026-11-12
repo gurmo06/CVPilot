@@ -74,7 +74,6 @@ class OpenClawCLITests(unittest.TestCase):
         response={'status':'error','result':{'payloads':[{'text':'Actual model failure','isError':True}],'meta':{}}}
         with (mock.patch.object(worker,'ROOT',self.root),mock.patch.object(worker,'new_worktree',return_value=(task,'main')),
               mock.patch.object(worker,'stage_agent_task',return_value=task),mock.patch.object(worker,'validate_agent_task'),
-              mock.patch.object(worker,'review_qualifications',return_value=[]),
               mock.patch.object(worker,'run_git',return_value='a'*40),
               mock.patch.object(main_commits,'recover',return_value=None),mock.patch.object(main_commits,'begin',return_value={'base':'a'*40}),
               mock.patch.object(main_commits,'publish') as publish,

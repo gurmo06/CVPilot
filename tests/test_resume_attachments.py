@@ -73,9 +73,6 @@ class ResumeWorkflowTests(unittest.TestCase):
         self.patch(worker,'ROOT',self.state)
         self.patch(worker,'agent_workspace',lambda uid:self.root/'.openclaw'/f'workspace-career-{uid}')
         self.patch(worker,'git_env',lambda uid:os.environ.copy())
-        # These transfer/publication tests supply their own model completions;
-        # the separate pre-draft review is exercised in test_preflight_review.
-        self.patch(worker,'review_qualifications',lambda *args:[])
         self.remote=self.root/'remote.git';self.seed=self.root/'seed'
         self.git('init','--bare','-b','main',str(self.remote))
         self.git('init','-b','main',str(self.seed))

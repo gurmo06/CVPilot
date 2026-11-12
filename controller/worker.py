@@ -1,7 +1,6 @@
 import json, os, re, secrets, shutil, subprocess, time, hashlib, tempfile
 from pathlib import Path
 import application_paths
-import qualifications
 from github import GitHub,GitHubAPIError,ssh_env,https_git_env
 from job_status import progress, missing_output
 from resumes import (label, inbox_path, staged_files, read_blob, artifact_files,
@@ -882,11 +881,6 @@ def download_master(uid, role, store):
             'attachments':encode_attachments(sorted(files.items()))}
 
 
-def review_qualifications(job,store,pack,posting):
-    import sys
-    return qualifications.review(sys.modules[__name__],job,store,pack,posting)
-
-
 def run_resume_job(job,store,*,reuse_saved_response=False):
     import main_commits,sys
     w=sys.modules[__name__]
@@ -931,8 +925,6 @@ def run_resume_job(job,store,*,reuse_saved_response=False):
         else:
             sync_inputs=profile_sync.prepare(task,run_git(uid,gitworktree(uid,jid),'rev-parse','HEAD'),extract_pdf,max_text=None)
             prior_confirmed=profile_sync.confirmed_facts(task)
-    if kind=='tailor' and not reuse_saved_response:
-        review_qualifications(job,store,resume_inputs,posting)
     publication=main_commits.begin(w,job,store)
     if reuse_saved_response and run_git(uid,repopath(uid),'rev-parse','origin/main')!=publication['base']:
         raise ValueError('Main changed since this job ran. Submit a fresh job instead of replaying old output.')
@@ -961,7 +953,7 @@ def run_resume_job(job,store,*,reuse_saved_response=False):
         target=task/folder/'resume.tex'
         if not target.is_file():raise RuntimeError(missing_output(target.relative_to(task),response))
         import qualifications
-        followups=qualifications.questions_for(job,store.path.parent) or qualifications.extract((target.parent/'notes.md').read_text() if (target.parent/'notes.md').is_file() else '')
+        followups=qualifications.extract((target.parent/'notes.md').read_text() if (target.parent/'notes.md').is_file() else '',limit=2)
         _write_intent(ROOT/'job-questions'/uid/f'{jid}.json',{'job_id':jid,'kind':'tailor','questions':followups})
         import page_refinement
         page_fit=page_refinement.fit(w,job,store,task,target,resume_inputs,posting,response,deadline,allow_model=not reuse_saved_response)
@@ -1018,7 +1010,7 @@ def run_resume_job(job,store,*,reuse_saved_response=False):
     elif kind=='tailor' and page_fit['rounds']:
         note+=f" Page fit completed after {page_fit['rounds']} measured refinement round(s); font sizes and layout were preserved."
     if kind=='tailor':
-        extra=qualifications.message(jid,followups) if not data.get('accepted_review') else ''
+        extra=qualifications.message(jid,followups)
         if extra:note+='\n\n'+extra
     return main_commits.publish(w,job,store,{'note':note,'artifacts':artifacts,**({'questions':followups} if kind=='tailor' else {})})
 
@@ -1078,12 +1070,6 @@ def forever(store,stop=None):
                 try:shutil.rmtree(inbox_path(ROOT,job['discord_id'],payload['upload_id']))
                 except OSError as exc:print(f'CVPilot upload cleanup warning job {job["id"]}: {exc}',flush=True)
             notify(job['discord_id'],f"CVPilot job #{job['id']} complete. {result.get('url','')}\n{result.get('note','')}",files=files)
-        except qualifications.ReviewRequired as review:
-            note='Awaiting your qualification review before drafting. No application files have been created or published.\n'+qualifications.message(job['id'],review.questions)
-            store.finish(job['id'],'needs-input',result={'questions':review.questions,'note':note})
-            progress(store.path.parent,job,'Awaiting answers or an explicit continue command; drafting has not started')
-            cleanup_completed(job['discord_id'],job['id'])
-            notify(job['discord_id'],f'CVPilot job #{job["id"]} needs your input.\n'+note)
         except Exception as e:
             store.finish(job['id'],'failed',error=str(e))
             from qualifications import questions_for,message

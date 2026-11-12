@@ -19,8 +19,9 @@ For profile-sync jobs, the worker supplies one bounded source excerpt per pass
 and requests detailed factual records with exact contiguous evidence quotes.
 Follow that pass's JSON schema. Do not use tools, run commands, edit files or
 return a rewritten profile summary. Preserve responsibilities, methods, scope,
-results/metrics, dates, tools and project/role context. Do not infer skills from
-related experience. The controller merges all passes into the durable evidence
+results/metrics, dates, tools and project/role context. Record documented
+actions in full even when they do not name a job keyword; do not invent skills,
+products, proficiency or credentials from merely related experience. The controller merges all passes into the durable evidence
 database, retains complete source text and preserves existing confirmed and
 historical records. There is no page or brevity goal for the master profile.
 

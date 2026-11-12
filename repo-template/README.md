@@ -46,20 +46,24 @@ would damage facts or layout, CVPilot retains the substantially filled, validate
 one-page draft with an explicit warning. It still refuses multi-page output or
 large losses of useful context.
 
-Before generating TeX, CVPilot reviews the posting against all sources and
-confirmed profile facts. If important qualifications need clarification, the
-job pauses as `needs-input` and asks focused questions in Discord and
-`/cvpilot status`. It releases the queue while waiting. Answer with `/cvpilot answer
-job_id:<id> question:<number> details:<your actual experience>`. Review the exact
-statement, choose **Save to profile**, and type **CONFIRM** within 2 minutes.
-Only your statement is added as user-confirmed experience; the bot does not
-infer proficiency, dates or achievements. Decline by leaving it unanswered or
-cancelling; unsupported qualifications stay out. Once the profile-save job
-completes, run `/cvpilot continue job_id:<original job>` to resume with the new
-fact. You can also continue without answers; unknown qualifications remain
-unconfirmed and stay out. The same tailoring job ID is retained. Answers
-work in server commands and DMs with the same current-role checks. Master
-resume files remain unchanged; a normal revert can undo the profile commit.
+CVPilot drafts autonomously from all source resumes and confirmed profile facts.
+It chooses relevant evidence and truthful wording without a qualification
+interview or approval of routine editorial decisions. Notes explain the
+selected evidence, keyword coverage and unsupported requirements. Documented
+actions can establish a capability without the exact posting keyword; related
+experience alone cannot establish an unmentioned tool or qualification.
+
+Up to two short optional factual questions can accompany the draft in Discord
+and `/cvpilot status`; drafting does not wait for answers. If useful, answer
+with `/cvpilot answer job_id:<id> question:<number> details:<your experience>`.
+Review the exact statement, choose **Save to profile**, and type **CONFIRM**
+within 2 minutes. Only your statement becomes a profile fact; source resumes
+remain unchanged. After the save completes, `/cvpilot continue job_id:<id>`
+queues a new version using current evidence and saved facts, keeping the
+original application and job history. Unanswered qualifications stay out.
+Older jobs already paused as `needs-input` can continue without answers and
+retain their original ID. Answers work in server commands and DMs with the
+same permission checks; a normal revert can undo the profile commit.
 
 Each request keeps its permanent job ID (for example, `#20`) and also shows
 its current position among all pending CVPilot jobs, the number ahead of it,

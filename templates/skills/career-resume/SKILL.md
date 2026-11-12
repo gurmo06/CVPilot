@@ -19,13 +19,15 @@ The worker saves files at fixed job paths, verifies read-only inputs, compiles
 the one-page PDF and commits validated changes to main. For other tasks, follow
 their explicit task instructions and use complete absolute sandbox paths.
 
-Before drafting, a separate qualification-review task requests only a small
-question assessment. Compare the important posting requirements with all
-sources and confirmed facts; ask about material gaps without inferring new
-skills or inventing posting requirements. Do not generate TeX for that stage.
-If questions are returned, the worker pauses and asks the user in Discord.
-After answers are saved, /cvpilot continue resumes the same job. Qualifications
-left unanswered remain unconfirmed and must not be inserted into the resume.
+Draft autonomously from the available evidence. Compare the posting's main
+responsibilities and qualifications with ALL sources, prioritize directly
+supported capabilities and useful transferable experience, and choose content,
+wording and structure without requesting routine approvals. A documented action
+can demonstrate a capability without using the exact job keyword. A related
+tool or setting alone does not prove an unmentioned product, license,
+proficiency or experience. Preserve actual titles, employers, seniority, dates
+and metrics. Omit unsupported claims and finish the best supported draft;
+missing qualifications do not require a pre-draft interview.
 
 Start initial notes with `Company: <employer>` and `Position: <exact title>`
 copied from the posting; use Unknown if unavailable. Keep these headers in
@@ -56,17 +58,22 @@ action, scope/method and outcome/metrics together so bullets remain useful.
 When fitting overflow, target short spillovers in wrapped bullets first: reword two lines into one or
 three into two when the meaning survives. Keep already concise bullets intact.
 Do not force every bullet onto one line, replace context with cryptic fragments,
-or infer qualifications from adjacent technologies. Explain initial substantive
-omissions/replacements and name the baseline in notes.
+or infer qualifications from adjacent technologies. In notes, name the layout
+baseline, map key requirements to selected evidence with source paths or
+confirmed fact references, and explain substantive omissions/replacements.
+Report genuine coverage and gaps without invented match scores or ATS promises.
 
-When an important requirement lacks evidence, ask a focused question about the
-person's actual experience rather than assuming it or silently ignoring it.
-Return up to three questions in the pre-draft assessment. Check all
-sources and confirmed facts first; avoid questions about incidental keywords
-or already documented qualifications. The worker delivers the questions in
-Discord. `/cvpilot answer` previews the person's own statement and requires
-CONFIRM before a separate trusted job saves it as a profile fact. Tailoring
-itself still cannot modify the profile, invent answers or fabricate confirmations.
+Only after checking all sources and confirmed facts, include at most TWO short,
+optional questions if genuinely unresolved facts would materially improve a
+later revision. Format each `Question: <topic> | <one factual question>` in
+cvpilot-notes alongside the complete draft. No questions is a valid outcome.
+Avoid broad project narratives, repeated requests for documented evidence or
+routine layout/content approvals. The worker drafts and publishes without
+waiting for these answers. `/cvpilot answer` previews the person's exact
+statement and requires CONFIRM before saving it as a profile fact. After that
+save completes, `/cvpilot continue job_id:<original job>` requests an updated
+draft in a new job; older jobs held for answers resume with their original ID.
+Tailoring itself cannot modify the profile, invent answers or confirmations.
 
 For page-fit refinements, follow the worker's measured line-reduction target.
 It reports overflow rows, available first-page space and the net number of body

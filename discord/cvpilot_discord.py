@@ -167,7 +167,7 @@ async def help_command(interaction: discord.Interaction):
         '`/cvpilot profile sync` — Extract details from all sources.\n'
         '`/cvpilot profile edit instructions:<facts>` — Review and confirm your statement.\n'
         '`/cvpilot answer job_id:<id> question:<n> details:<experience>` — Confirm a qualification answer.\n'
-        '`/cvpilot continue job_id:<id>` — Resume after qualification review.\n'
+        '`/cvpilot continue job_id:<id>` — Update a finished draft or resume an older paused job.\n'
         '`/cvpilot history [limit]` — Main commits.\n'
         '`/cvpilot revert commit:<ID>` — Undo a commit; type REVERT.\n'
         '`/cvpilot reset` — Restore template; type RESET.\n'
@@ -462,8 +462,8 @@ async def answer(interaction:discord.Interaction,job_id:int,question:app_command
     await prepare_repository_change(interaction,'answer',AnswerView,job_id=job_id,question=question,details=details)
 
 
-@cvpilot.command(name='continue',description='Continue a tailoring job after reviewing its qualification questions')
-@app_commands.describe(job_id='Your tailoring job awaiting answers; unanswered qualifications stay unconfirmed')
+@cvpilot.command(name='continue',description='Update a finished tailoring job using current facts, or resume a paused job')
+@app_commands.describe(job_id='Your finished or paused tailoring job; uses saved facts without requiring answers')
 async def continue_tailoring(interaction:discord.Interaction,job_id:int):
     await invoke(interaction,'continue',job_id=job_id)
 
