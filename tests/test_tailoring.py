@@ -72,8 +72,8 @@ class TailoringTests(unittest.TestCase):
         self.assertIn('actively selecting and adapting content',prompt)
         self.assertIn('Do not merely shorten a pre-existing resume',prompt)
         self.assertIn('Draft autonomously from available evidence',prompt)
-        self.assertIn('at most TWO short, specific optional follow-ups',prompt)
-        self.assertIn('never return only questions',prompt)
+        self.assertIn('Do not ask qualification questions',prompt)
+        self.assertIn('no questions or requests for user input',prompt)
         self.assertIn('Company: <employer name stated in the posting',prompt)
         self.assertIn('Position: <exact position title stated in the posting',prompt)
         with self.assertRaisesRegex(ValueError,'readable resume text'):tailoring.prompt(job,None,None)
@@ -243,8 +243,8 @@ class TailoringWorkflowTests(unittest.TestCase):
             result=worker.work(job,self.store)
         self.assertEqual(len(calls),1);self.assertTrue(result['on_main']);self.assertTrue(result['changed'])
         self.assertEqual(len(result['artifacts']),2)
-        self.assertEqual(result['questions'][0]['term'],'First aid')
-        self.assertIn('/cvpilot answer job_id:',result['note'])
+        self.assertEqual(result['questions'],[])
+        self.assertNotIn('/cvpilot answer job_id:',result['note'])
         folder=f'applications/{time.gmtime().tm_year}/job-{jid}-example-school-classroom-teacher'
         for name in ('resume.pdf','resume.tex','job-url.txt','notes.md'):
             self.assertTrue(self.fixture.git('-C',str(self.fixture.remote),'ls-tree','main','--',folder+'/'+name))

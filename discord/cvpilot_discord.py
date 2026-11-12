@@ -166,7 +166,7 @@ async def help_command(interaction: discord.Interaction):
         '`/cvpilot profile show` — Detailed evidence database.\n'
         '`/cvpilot profile sync` — Extract details from all sources.\n'
         '`/cvpilot profile edit instructions:<facts>` — Review and confirm your statement.\n'
-        '`/cvpilot answer job_id:<id> question:<n> details:<experience>` — Confirm a qualification answer.\n'
+        '`/cvpilot answer job_id:<id> question:<n> details:<experience>` — Answer an archived qualification question.\n'
         '`/cvpilot continue job_id:<id>` — Update a finished draft or resume an older paused job.\n'
         '`/cvpilot history [limit]` — Main commits.\n'
         '`/cvpilot revert commit:<ID>` — Undo a commit; type REVERT.\n'
@@ -455,7 +455,7 @@ async def tailor(interaction: discord.Interaction, url: str):
     await invoke(interaction, 'tailor', url=url)
 
 
-@cvpilot.command(name='answer',description='Answer a tailoring question and review a fact before saving it to your profile')
+@cvpilot.command(name='answer',description='Answer an archived tailoring question and review a fact before saving it')
 @app_commands.describe(job_id='Tailoring job that asked the question',question='Question number shown in the job status',
                        details='Describe your actual experience in your own words; no skill is assumed from yes/no')
 async def answer(interaction:discord.Interaction,job_id:int,question:app_commands.Range[int,1,3],details:str):

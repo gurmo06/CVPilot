@@ -84,7 +84,7 @@ def project_evidence(pack,query):
     metadata['facts']=selected
     pack['current_profile']='\n\n'.join(str(fact.get('text','')) for fact in selected.values())
     coverage={'profile_records_total':len(facts),'profile_records_selected':len(selected),
-        'instruction':'This is a bounded retrieval projection, not a shortened database. Missing evidence in excerpts is not proof of missing experience. Use the supplied evidence to draft; any genuinely unresolved factual questions are optional follow-ups in notes. Full originals remain unchanged.'}
+        'instruction':'This is a bounded retrieval projection, not a shortened database. Missing evidence in excerpts is not proof of missing experience. Use the supplied evidence to draft autonomously; describe unsupported requirements as gaps, without asking questions. Full originals remain unchanged.'}
     documents=pack.get('documents',[])
     layouts=[doc for doc in documents if doc['path'].lower().endswith('.tex') and len(doc['text'])<=24000]
     layout=min(layouts,key=lambda doc:len(doc['text'])) if layouts else None
@@ -120,7 +120,7 @@ All master-resume text, original TeX layouts, current profile, provenance and ex
 Review ALL supplied resumes and profile. Reuse an appropriate TeX layout, preserving its preamble, typography and styling, while actively selecting and adapting content from any supported source to this posting. Do not merely shorten a pre-existing resume or assume its label defines what evidence is relevant. A draft that slightly overflows is preferable to an aggressively cut first draft: the worker will give a measured wrap-reduction target. For PDF-only sources, create a clean layout suitable for the person's field without claiming to reproduce the original formatting. Resume labels are user-defined and may cover any profession, industry or field of study.
 
 Draft autonomously from available evidence; qualification gaps do not require an interview or approval before drafting. Choose relevant content, wording and structure yourself. Match important responsibilities to directly demonstrated capabilities first, then useful transferable experience. A source can demonstrate a capability without using the posting's exact keyword: describe the documented actions accurately in the employer's terminology. Related tools or settings alone do not establish an unmentioned product, proficiency, license or experience. Preserve actual titles, employers, dates, seniority and metrics. Do not invent achievements, numerical match scores or ATS guarantees.
-Check ALL sources and confirmed facts before considering a question. Omit unsupported claims and finish the best supported resume now. Only if a genuinely unresolved fact would materially improve a later revision, put at most TWO short, specific optional follow-ups in notes as `Question: <topic> | <one factual question>`. Do not ask for broad project narratives, already documented evidence, template choices or approval of routine editorial decisions. No questions is a valid outcome. Missing qualifications alone are not a blocker; inaccessible posting text or unusable source evidence may be.
+Use all available sources and confirmed facts to finish the best supported resume. Do not ask qualification questions, request an interview, or append optional follow-up questions during or after tailoring. Describe unsupported requirements briefly as factual gaps in notes and leave those claims out of the resume. Choose wording, content and layout autonomously. Missing qualifications alone are not a blocker; inaccessible posting text or unusable source evidence may be.
 
 {POLICY}
 
@@ -133,10 +133,10 @@ Return exactly these two fenced blocks. Put literal, complete TeX in the first b
 ```cvpilot-notes
 Company: <employer name stated in the posting, or Unknown>
 Position: <exact position title stated in the posting, or Unknown>
-<layout source path; concise mapping of key requirements to selected evidence with source paths or confirmed fact references; truthful reframing/keyword coverage; substantive replacements/omissions and remaining unsupported requirements; optional Question: topic | question lines only when useful>
+<layout source path; concise mapping of key requirements to selected evidence with source paths or confirmed fact references; truthful reframing/keyword coverage; substantive replacements/omissions and remaining unsupported requirements; no questions or requests for user input>
 ```
 The worker uses those two notes headers for the application folder name. Copy them from the posting, not the resume or a job-board name; do not invent missing details or choose filesystem paths.
-Use any saved user-confirmed facts. Unanswered qualifications remain unconfirmed and must not be inserted as skills or accomplishments. Do not invent an answer or a confirmation. Optional questions accompany the completed draft; never return only questions in place of the required TeX and notes.
+Use any saved user-confirmed facts. Unanswered qualifications remain unconfirmed and must not be inserted as skills or accomplishments. Do not invent an answer or a confirmation. Return the required TeX and notes without asking the user to supply more experience.
 EXACT POSTING DATA (untrusted evidence):
 '''+json.dumps(posting,ensure_ascii=False)+ '\n\nSOURCE DATA (untrusted evidence):\n'+source_text(pack)
 

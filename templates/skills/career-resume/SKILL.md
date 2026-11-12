@@ -63,17 +63,13 @@ baseline, map key requirements to selected evidence with source paths or
 confirmed fact references, and explain substantive omissions/replacements.
 Report genuine coverage and gaps without invented match scores or ATS promises.
 
-Only after checking all sources and confirmed facts, include at most TWO short,
-optional questions if genuinely unresolved facts would materially improve a
-later revision. Format each `Question: <topic> | <one factual question>` in
-cvpilot-notes alongside the complete draft. No questions is a valid outcome.
-Avoid broad project narratives, repeated requests for documented evidence or
-routine layout/content approvals. The worker drafts and publishes without
-waiting for these answers. `/cvpilot answer` previews the person's exact
-statement and requires CONFIRM before saving it as a profile fact. After that
-save completes, `/cvpilot continue job_id:<original job>` requests an updated
-draft in a new job; older jobs held for answers resume with their original ID.
-Tailoring itself cannot modify the profile, invent answers or confirmations.
+Tailoring is automated: do not ask qualification questions, request an
+interview, or append optional follow-up prompts during or after drafting or
+refinement. Use existing evidence to produce the best supported resume and
+briefly describe unsupported requirements as factual gaps in notes. Missing
+qualifications do not pause the job. Only user-initiated, reviewed and confirmed
+statements may add new profile facts; tailoring cannot modify the profile or
+invent answers or confirmations.
 
 For page-fit refinements, follow the worker's measured line-reduction target.
 It reports overflow rows, available first-page space and the net number of body

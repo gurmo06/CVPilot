@@ -40,6 +40,19 @@ class QualificationTests(unittest.TestCase):
         self.store.finish(self.jid,'failed',error='A later stage failed')
         self.assertEqual(len(q.questions_for(self.store.job(self.jid),self.store.path.parent)),2)
 
+    def test_explicit_empty_questions_prevent_fallback_to_unsolicited_model_prompts(self):
+        report=self.store.path.parent/'job-reports'/UID/f'{self.jid}.json'
+        worker._write_intent(report,{'payloads':[{'text':'```cvpilot-notes\nQuestion: License | Do you hold this license?\n```'}]})
+        self.store.finish(self.jid,'done',{'questions':[]})
+        self.assertEqual(q.questions_for(self.store.job(self.jid),self.store.path.parent),[])
+        self.store.finish(self.jid,'failed',error='Bad output')
+        record=self.store.path.parent/'job-questions'/UID/f'{self.jid}.json'
+        worker._write_intent(record,{'job_id':self.jid,'kind':'tailor','questions':[]})
+        self.assertEqual(q.questions_for(self.store.job(self.jid),self.store.path.parent),[])
+        page=self.call('status',{'job_id':self.jid})
+        self.assertNotIn('Archived questions (older workflow)',page['status_detail']['report'])
+        with self.assertRaisesRegex(ValueError,'question number'):self.preview()
+
     def test_preview_cancel_and_wrong_confirmation_do_not_queue_or_commit(self):
         before=self.fixture.main();preview=self.preview()
         self.assertIn('Your statement: I cared',preview['text']);self.assertIsNone(self.store.claim())

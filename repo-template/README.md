@@ -53,17 +53,17 @@ selected evidence, keyword coverage and unsupported requirements. Documented
 actions can establish a capability without the exact posting keyword; related
 experience alone cannot establish an unmentioned tool or qualification.
 
-Up to two short optional factual questions can accompany the draft in Discord
-and `/cvpilot status`; drafting does not wait for answers. If useful, answer
-with `/cvpilot answer job_id:<id> question:<number> details:<your experience>`.
-Review the exact statement, choose **Save to profile**, and type **CONFIRM**
-within 2 minutes. Only your statement becomes a profile fact; source resumes
-remain unchanged. After the save completes, `/cvpilot continue job_id:<id>`
-queues a new version using current evidence and saved facts, keeping the
-original application and job history. Unanswered qualifications stay out.
-Older jobs already paused as `needs-input` can continue without answers and
-retain their original ID. Answers work in server commands and DMs with the
-same permission checks; a normal revert can undo the profile commit.
+Tailoring and page refinement do not ask qualification questions or request
+additional experience. Unsupported claims stay out; notes describe gaps.
+To add experience separately, use `/cvpilot profile edit instructions:<facts>`,
+review the exact statement, and type **CONFIRM**. Only your statement becomes a
+profile fact; source resumes remain unchanged. After the save completes,
+`/cvpilot continue job_id:<id>` queues a new version using current evidence and
+saved facts, keeping the original application and job history.
+Older jobs paused as `needs-input` can continue without answers and retain their
+original ID. `/cvpilot answer` remains available for archived questions from the
+older workflow. The same permission checks apply in server commands and DMs;
+a normal revert can undo a profile commit.
 
 Each request keeps its permanent job ID (for example, `#20`) and also shows
 its current position among all pending CVPilot jobs, the number ahead of it,

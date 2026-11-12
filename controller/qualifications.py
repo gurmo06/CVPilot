@@ -1,4 +1,4 @@
-"""Ask about evidence gaps; only the user's confirmed words become profile facts."""
+"""Confirm user-supplied profile facts and support answers to archived questions."""
 import hashlib
 import hmac
 import json
@@ -19,7 +19,7 @@ def clean(text,limit):
     return ' '.join(re.sub(r'[\x00-\x1f\x7f-\x9f]', ' ',text).split())[:limit].replace('@','@\u200b')
 
 
-def extract(notes,*,limit=3):
+def extract(notes):
     questions=[];seen=set();section=False
     for line in notes.splitlines():
         line=line.replace('**','').strip().lstrip('-* ')
@@ -32,7 +32,7 @@ def extract(notes,*,limit=3):
         else:continue
         if not term or not question or term.casefold() in seen:continue
         seen.add(term.casefold());questions.append({'term':term,'question':question})
-        if len(questions)==limit:break
+        if len(questions)==3:break
     return questions
 
 
@@ -40,10 +40,14 @@ def questions_for(job,root):
     from job_status import private_json
     result=json.loads(job.get('result') or '{}')
     saved=private_json(root,'job-questions',job)
-    raw=result.get('questions') or (saved.get('questions') if saved.get('job_id')==job['id'] and saved.get('kind')=='tailor' else [])
-    if not raw:
+    if saved.get('job_id')==job['id'] and saved.get('kind')=='tailor' and 'questions' in saved:
+        raw=saved['questions']
+    elif 'questions' in result:raw=result['questions']
+    else:
+        raw=[]
         # Older jobs may have ordinary numbered questions in saved notes that
-        # the previous strict prefix parser silently discarded.
+        # the previous strict prefix parser silently discarded. An explicit
+        # empty list from the automated workflow must never fall back to them.
         report=private_json(root,'job-reports',job)
         text='\n'.join(item.get('text','') for item in report.get('payloads',[]) if isinstance(item,dict)
             and isinstance(item.get('text'),str) and not item.get('isReasoning') and not item.get('isCommentary'))
@@ -56,7 +60,7 @@ def questions_for(job,root):
 
 def message(jid,questions):
     if not questions:return ''
-    lines=['Optional follow-ups for a later revision (not added as facts; no answers required to draft):']
+    lines=['Archived questions from an older workflow (not added as facts; no answers required to draft):']
     lines.extend(f'{index}. {item["term"]}: {item["question"]}' for index,item in enumerate(questions,1))
     lines.append(f'If useful, use /cvpilot answer job_id:{jid} question:<number> details:<your factual experience> and review and type CONFIRM to save it. After the profile save completes, /cvpilot continue job_id:{jid} drafts an updated version; it also resumes older jobs awaiting answers. Unanswered qualifications stay unconfirmed.')
     return '\n'.join(lines)

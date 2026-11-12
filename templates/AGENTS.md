@@ -41,12 +41,12 @@ outdated profile. Only use profile facts that are user-confirmed or whose cited
 hashes match the current masters; corroborate stale facts in current sources.
 Return resume TeX and notes, without a profile JSON block. Profile updates belong
 to `/cvpilot profile sync`, an explicitly authorized profile/master edit, or a
-user-confirmed answer through `/cvpilot answer`. Check all sources before
-asking anything. Complete the best supported draft now; at most two short,
-optional factual questions may accompany it in notes when they could materially
-improve a later revision. Do not ask for broad narratives or facts already
-documented. Only the user's reviewed statement can become confirmed; unanswered
-qualifications stay out. Missing qualifications alone do not block drafting.
+user-confirmed answer through `/cvpilot answer`. Check all sources when
+tailoring. Complete the best supported draft autonomously, without qualification
+questions, interviews or optional follow-up prompts during or after drafting.
+Describe unsupported requirements as gaps in notes; leave those claims out of
+the resume. Missing qualifications alone do not block drafting. User-initiated
+profile updates still require review and confirmation of the exact statement.
 Master edit jobs only run if CVPilot settings permit them and the user expressly
 requested the change. Profile sync may add verified facts from *any* master resume
 and must track their source. A missing mention does not invalidate user-confirmed

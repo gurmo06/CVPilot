@@ -1,4 +1,4 @@
-"""Draft first, optional follow-ups, and compatibility with previously held jobs."""
+"""Automated tailoring without questions, plus compatibility with held jobs."""
 import json
 from contextlib import closing
 import threading
@@ -42,7 +42,7 @@ class AutonomousTailoringTests(unittest.TestCase):
         self.store.finish(self.jid,'done',result);self.assertEqual(agent.call_count,1)
         return result,agent.call_args.args[1]
 
-    def test_optional_questions_accompany_published_files_without_pausing_or_saving_facts(self):
+    def test_unsolicited_model_questions_are_not_delivered_or_saved_as_facts(self):
         stop=threading.Event();sent=[]
         def notify(uid,text,**kwargs):sent.append((text,kwargs));stop.set()
         with (mock.patch.object(worker,'agent_completion',return_value=response(notes=NOTES)) as agent,
@@ -51,23 +51,23 @@ class AutonomousTailoringTests(unittest.TestCase):
             worker.forever(self.store,stop)
         job=self.store.job(self.jid);result=json.loads(job['result'])
         self.assertEqual(job['state'],'done');self.assertEqual(agent.call_count,1)
-        self.assertEqual(result['questions'],QUESTIONS);self.assertEqual(self.fixture.main(),result['commit'])
+        self.assertEqual(result['questions'],[]);self.assertEqual(self.fixture.main(),result['commit'])
         self.assertNotEqual(self.fixture.main(),self.before)
         self.assertEqual({item['path'].rsplit('/',1)[-1] for item in result['artifacts']},{'resume.pdf','resume.tex'})
         self.assertEqual({name for name,_ in sent[0][1]['files']},{'resume.pdf','resume.tex'})
-        self.assertIn('Optional follow-ups',sent[0][0]);self.assertIn('/cvpilot answer',sent[0][0])
+        self.assertNotIn('First aid',sent[0][0]);self.assertNotIn('/cvpilot answer',sent[0][0])
         self.assertFalse(self.store.has_pending(UID))
         changes=self.fixture.git('-C',str(self.fixture.remote),'diff','--name-only',self.before,'main').splitlines()
         self.assertTrue(all(name.startswith('applications/') for name in changes))
         self.assertFalse(self.fixture.git('-C',str(self.fixture.remote),'ls-tree','main','--','profile/profile_sources.json'))
         page=self.call('status',{'job_id':self.jid})
-        self.assertIn('Optional follow-ups',page['status_detail']['report'])
+        self.assertNotIn('Have you completed first-aid training?',page['status_detail']['report'])
         self.assertNotIn('Awaiting your input',page['status_detail']['report'])
 
-    def test_answer_then_continue_creates_a_new_draft_from_fresh_facts_preserving_original(self):
+    def test_profile_update_then_continue_uses_fresh_facts_preserving_original(self):
         original,_=self.complete();old_id=self.jid;old_row=self.store.job(old_id)
-        preview=self.call('answer',{'job_id':old_id,'question':1,'details':'I completed first-aid training during supervised school placements.'})
-        self.call('answer',{'operation':'confirm','token':preview['confirmation_token'],'confirmation':'CONFIRM'})
+        preview=self.call('profile',{'operation':'edit','instructions':'I completed first-aid training during supervised school placements.'})
+        self.call('profile-fact',{'operation':'confirm','token':preview['confirmation_token'],'confirmation':'CONFIRM'})
         with self.assertRaisesRegex(ValueError,'queued/running'):self.call('continue',{'job_id':old_id})
         save=self.store.claim();self.assertEqual(save['kind'],'profile-confirm');self.fixture.finish(save)
         queued=self.call('continue',{'job_id':old_id});self.assertIn('Updated draft requested',queued['text'])
@@ -107,14 +107,14 @@ class AutonomousTailoringTests(unittest.TestCase):
         result,_=self.complete(notes='Supported classroom evidence.');self.assertEqual(result['questions'],[])
         self.assertNotIn('/cvpilot answer',result['note'])
 
-    def test_new_followups_are_limited_to_two_while_legacy_questions_remain_readable(self):
+    def test_new_jobs_have_no_questions_while_legacy_questions_remain_readable(self):
         notes='\n'.join(f'Question: Topic {n} | Have you done task {n}?' for n in range(1,5))
-        result,_=self.complete(notes=notes);self.assertEqual(len(result['questions']),2)
+        result,_=self.complete(notes=notes);self.assertEqual(result['questions'],[])
         legacy=self.store.enqueue(UID,'tailor',{'url':'https://jobs.example/legacy'})
         self.store.claim();self.store.finish(legacy,'needs-input',{'questions':q.extract(notes)})
         self.assertEqual(len(q.questions_for(self.store.job(legacy),self.store.path.parent)),3)
 
-    def test_compiler_failure_keeps_optional_questions_but_does_not_publish(self):
+    def test_compiler_failure_does_not_publish_or_offer_questions(self):
         job=self.store.claim()
         with (mock.patch.object(worker,'agent_completion',return_value=response(notes=NOTES)),
               mock.patch.object(worker,'compile_pdf',side_effect=RuntimeError('Compiler unavailable')),
@@ -122,8 +122,29 @@ class AutonomousTailoringTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError,'Compiler unavailable'):worker.work(job,self.store)
         self.store.finish(self.jid,'failed',error='Compiler unavailable')
         publish.assert_not_called();self.assertEqual(self.fixture.main(),self.before)
-        self.assertEqual(q.questions_for(self.store.job(self.jid),self.store.path.parent),QUESTIONS)
+        self.assertEqual(q.questions_for(self.store.job(self.jid),self.store.path.parent),[])
         result=self.call('continue',{'job_id':self.jid});self.assertIn('Updated draft requested',result['text'])
+
+    def test_resumed_legacy_questions_stay_suppressed_even_if_preparation_fails(self):
+        self.legacy_pause();self.call('continue',{'job_id':self.jid});job=self.store.claim()
+        with mock.patch.object(worker,'new_worktree',side_effect=RuntimeError('Source checkout unavailable')):
+            with self.assertRaisesRegex(RuntimeError,'Source checkout unavailable'):worker.work(job,self.store)
+        self.store.finish(self.jid,'failed',error='Source checkout unavailable')
+        self.assertEqual(q.questions_for(self.store.job(self.jid),self.store.path.parent),[])
+        self.assertEqual(self.fixture.main(),self.before)
+
+    def test_current_drafting_and_refinement_protocols_follow_archived_questions(self):
+        job=self.store.job(self.jid)
+        history='SHARED USER CONVERSATION: Answer qualification questions for job #56 first.'
+        for protocol in ('Return cvpilot-resume-tex and cvpilot-notes.',
+                         'Return cvpilot-resume-body and cvpilot-notes.'):
+            with (mock.patch('conversation.runtime.job_context',return_value=history),
+                  mock.patch.object(worker,'_agent_completion',return_value=response()) as agent):
+                worker.agent_completion(job,protocol,self.store.path.parent/'unused.json')
+            prompt=agent.call_args.args[1]
+            self.assertLess(prompt.index(history),prompt.index('CURRENT TAILORING STAGE'))
+            self.assertTrue(prompt.endswith(protocol))
+            self.assertIn('Do not repeat them or request new input',prompt)
 
     def test_continuation_reuses_posting_url_validation(self):
         self.store.claim()
